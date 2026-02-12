@@ -383,51 +383,49 @@ impl<PointId: Identifier> Subpath<PointId> {
 		Self::new(manipulator_groups, false)
 	}
 
-	pub fn new_heart(center: DVec2, radius: f64, cleft_angle: f64, tip_angle: f64, bulb_height: f64) -> Self {
-		// Cleft anchor
-		let top_anchor = center - DVec2::new(0., radius * 0.3);
-		let bottom_anchor = center + DVec2::new(0., radius);
+	pub fn new_heart(
+		center: DVec2,
+		radius: f64,
+		cleft_angle: f64,
+		tip_angle: f64,
+		left_bulb_height: f64,
+		right_bulb_height: f64,
+		left_bulb_expand: f64,
+		right_bulb_expand: f64,
+		cleft_depth: f64,
+		tip_depth: f64,
+	) -> Self {
+		// Anchors
+		let top_anchor = center - DVec2::new(0., radius * cleft_depth);
+		let bottom_anchor = center + DVec2::new(0., radius * tip_depth);
 
-		// Place side anchors.
-		let side_y = center.y + radius * bulb_height;
 		let side_x = radius;
-		let right_anchor = DVec2::new(center.x + side_x, side_y);
-		let left_anchor = DVec2::new(center.x - side_x, side_y);
+		// Offset is for less squat shape (-0.25).
+		let right_anchor = DVec2::new(
+			center.x + side_x * (1. + right_bulb_expand),
+			(center.y + radius * (right_bulb_height - 0.25)) * (1. + right_bulb_expand) - center.y * right_bulb_expand,
+		);
+		let left_anchor = DVec2::new(
+			center.x - side_x * (1. + left_bulb_expand),
+			(center.y + radius * (left_bulb_height - 0.25)) * (1. + left_bulb_expand) - center.y * left_bulb_expand,
+		);
 
-		// Handle lengths
-		let top_handle_len = radius * 0.5;
-		let side_top_handle_len = radius * 0.5;
-		let side_bottom_handle_len = radius * 0.6;
-		let bottom_handle_len = radius * 0.4;
-
-		// Cleft tangents
+		// Handle Directions
 		let (top_sin, top_cos) = cleft_angle.sin_cos();
-		let top_right_dir = DVec2::new(top_sin, -top_cos);
-		let top_left_dir = DVec2::new(-top_sin, -top_cos);
+		let top_dir = DVec2::new(top_sin, -top_cos) * radius * 0.5;
 
-		let top_right_handle = top_anchor + top_right_dir * top_handle_len;
-		let top_left_handle = top_anchor + top_left_dir * top_handle_len;
+		let (bot_sin, bot_cos) = tip_angle.sin_cos();
+		let bot_dir = DVec2::new(bot_sin, -bot_cos) * radius * 0.45;
 
-		// Side tangents
-		let right_top_handle = right_anchor + DVec2::new(0., -side_top_handle_len);
-		let right_bottom_handle = right_anchor + DVec2::new(0., side_bottom_handle_len);
-
-		let left_top_handle = left_anchor + DVec2::new(0., -side_top_handle_len);
-		let left_bottom_handle = left_anchor + DVec2::new(0., side_bottom_handle_len);
-
-		// Tip tangents
-		let (bottom_sin, bottom_cos) = tip_angle.sin_cos();
-		let bottom_right_handle_dir = DVec2::new(bottom_sin, -bottom_cos);
-		let bottom_right_handle = bottom_anchor + bottom_right_handle_dir * bottom_handle_len;
-
-		let bottom_left_handle_dir = DVec2::new(-bottom_sin, -bottom_cos);
-		let bottom_left_handle = bottom_anchor + bottom_left_handle_dir * bottom_handle_len;
+		// Side Tangents
+		let side_up = DVec2::new(0., -radius * 0.4);
+		let side_down = DVec2::new(0., radius * 0.5);
 
 		let manipulator_groups = vec![
-			ManipulatorGroup::new(top_anchor, Some(top_left_handle), Some(top_right_handle)),
-			ManipulatorGroup::new(right_anchor, Some(right_top_handle), Some(right_bottom_handle)),
-			ManipulatorGroup::new(bottom_anchor, Some(bottom_right_handle), Some(bottom_left_handle)),
-			ManipulatorGroup::new(left_anchor, Some(left_bottom_handle), Some(left_top_handle)),
+			ManipulatorGroup::new(top_anchor, Some(top_anchor + DVec2::new(-top_dir.x, top_dir.y)), Some(top_anchor + top_dir)),
+			ManipulatorGroup::new(right_anchor, Some(right_anchor + side_up), Some(right_anchor + side_down)),
+			ManipulatorGroup::new(bottom_anchor, Some(bottom_anchor + bot_dir), Some(bottom_anchor + DVec2::new(-bot_dir.x, bot_dir.y))),
+			ManipulatorGroup::new(left_anchor, Some(left_anchor + side_down), Some(left_anchor + side_up)),
 		];
 
 		Self::new(manipulator_groups, true)
