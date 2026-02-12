@@ -146,6 +146,27 @@ fn rectangle<T: CornerRadius>(
 	corner_radius.generate(DVec2::new(width, height), clamped)
 }
 
+/// Generates a heart shape with adjustable proportions.
+#[node_macro::node(category("Vector: Shape"))]
+fn heart(
+	_: impl Ctx,
+	_primary: (),
+	#[unit(" px")]
+	#[default(50.)]
+	radius: f64,
+	#[default(30.)] cleft_angle: f64,
+	#[default(45.)] tip_angle: f64,
+	#[default(0.)] bulb_height: f64,
+) -> Table<Vector> {
+	Table::new_from_element(Vector::from_subpath(subpath::Subpath::new_heart(
+		DVec2::splat(0.),
+		radius,
+		cleft_angle.to_radians(),
+		tip_angle.to_radians(),
+		bulb_height,
+	)))
+}
+
 /// Generates an regular polygon shape like a triangle, square, pentagon, hexagon, heptagon, octagon, or any higher n-gon.
 #[node_macro::node(category("Vector: Shape"))]
 fn regular_polygon<T: AsU64>(

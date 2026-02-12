@@ -382,6 +382,56 @@ impl<PointId: Identifier> Subpath<PointId> {
 
 		Self::new(manipulator_groups, false)
 	}
+
+	pub fn new_heart(center: DVec2, radius: f64, cleft_angle: f64, tip_angle: f64, bulb_height: f64) -> Self {
+		// Cleft anchor
+		let top_anchor = center - DVec2::new(0., radius * 0.3);
+		let bottom_anchor = center + DVec2::new(0., radius);
+
+		// Place side anchors.
+		let side_y = center.y + radius * bulb_height;
+		let side_x = radius;
+		let right_anchor = DVec2::new(center.x + side_x, side_y);
+		let left_anchor = DVec2::new(center.x - side_x, side_y);
+
+		// Handle lengths
+		let top_handle_len = radius * 0.5;
+		let side_top_handle_len = radius * 0.5;
+		let side_bottom_handle_len = radius * 0.6;
+		let bottom_handle_len = radius * 0.4;
+
+		// Cleft tangents
+		let (top_sin, top_cos) = cleft_angle.sin_cos();
+		let top_right_dir = DVec2::new(top_sin, -top_cos);
+		let top_left_dir = DVec2::new(-top_sin, -top_cos);
+
+		let top_right_handle = top_anchor + top_right_dir * top_handle_len;
+		let top_left_handle = top_anchor + top_left_dir * top_handle_len;
+
+		// Side tangents
+		let right_top_handle = right_anchor + DVec2::new(0., -side_top_handle_len);
+		let right_bottom_handle = right_anchor + DVec2::new(0., side_bottom_handle_len);
+
+		let left_top_handle = left_anchor + DVec2::new(0., -side_top_handle_len);
+		let left_bottom_handle = left_anchor + DVec2::new(0., side_bottom_handle_len);
+
+		// Tip tangents
+		let (bottom_sin, bottom_cos) = tip_angle.sin_cos();
+		let bottom_right_handle_dir = DVec2::new(bottom_sin, -bottom_cos);
+		let bottom_right_handle = bottom_anchor + bottom_right_handle_dir * bottom_handle_len;
+
+		let bottom_left_handle_dir = DVec2::new(-bottom_sin, -bottom_cos);
+		let bottom_left_handle = bottom_anchor + bottom_left_handle_dir * bottom_handle_len;
+
+		let manipulator_groups = vec![
+			ManipulatorGroup::new(top_anchor, Some(top_left_handle), Some(top_right_handle)),
+			ManipulatorGroup::new(right_anchor, Some(right_top_handle), Some(right_bottom_handle)),
+			ManipulatorGroup::new(bottom_anchor, Some(bottom_right_handle), Some(bottom_left_handle)),
+			ManipulatorGroup::new(left_anchor, Some(left_bottom_handle), Some(left_top_handle)),
+		];
+
+		Self::new(manipulator_groups, true)
+	}
 }
 
 pub fn calculate_growth_factor(a: f64, turns: f64, outer_radius: f64, spiral_type: SpiralType) -> f64 {
