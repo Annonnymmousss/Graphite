@@ -384,37 +384,90 @@ impl<PointId: Identifier> Subpath<PointId> {
 	}
 
 	pub fn new_heart(center: DVec2, radius: f64, cleft_angle: f64, tip_angle: f64, bulb_height: f64, bulb_expand: f64, cleft_depth: f64, tip_depth: f64) -> Self {
-		// Anchors
+		// === ANCHOR POSITIONS ===
+
+		// Cleft (top center, between the two lobes)
 		let top_anchor = center - DVec2::new(0., radius * cleft_depth);
+		// Tip (bottom center, pointed end)
 		let bottom_anchor = center + DVec2::new(0., radius * tip_depth);
 
-		let side_x = radius;
-		// Offset is for less squat shape (-0.25).
-		let right_anchor = DVec2::new(
-			center.x + side_x * (1. + bulb_expand),
-			(center.y + radius * (bulb_height - 0.25)) * (1. + bulb_expand) - center.y * bulb_expand,
-		);
-		let left_anchor = DVec2::new(
-			center.x - side_x * (1. + bulb_expand),
-			(center.y + radius * (bulb_height - 0.25)) * (1. + bulb_expand) - center.y * bulb_expand,
-		);
+		// Lobe anchors — near the cleft, with gentle adaptation to other parameters
+		let total_height = cleft_depth + tip_depth;
+		// Y: primarily driven by cleft_depth, with mild adjustment for tip_depth
+		let bulb_y = radius * (cleft_depth * 0.88 + tip_depth * 0.06 + bulb_height * 0.15);
+		let lobe_anchor_y = center.y - bulb_y;
+		// X: base width with gentle total_height scaling to keep proportions
+		let bulb_x = radius * (0.56 + total_height * 0.18) * (1. + bulb_expand);
+		let right_anchor = DVec2::new(center.x + bulb_x, lobe_anchor_y);
+		let left_anchor = DVec2::new(center.x - bulb_x, lobe_anchor_y);
 
-		// Handle Directions
-		let (top_sin, top_cos) = cleft_angle.sin_cos();
-		let top_dir = DVec2::new(top_sin, -top_cos) * radius * 0.5;
+		// === INTER-ANCHOR DISTANCES (drive handle lengths) ===
 
-		let (bot_sin, bot_cos) = tip_angle.sin_cos();
-		let bot_dir = DVec2::new(bot_sin, -bot_cos) * radius * 0.45;
+		let dist_top_right = top_anchor.distance(right_anchor).max(radius * 0.1);
+		let dist_right_bottom = right_anchor.distance(bottom_anchor).max(radius * 0.1);
+		let dist_bottom_left = bottom_anchor.distance(left_anchor).max(radius * 0.1);
+		let dist_left_top = left_anchor.distance(top_anchor).max(radius * 0.1);
 
-		// Side Tangents
-		let side_up = DVec2::new(0., -radius * 0.4);
-		let side_down = DVec2::new(0., radius * 0.5);
+		// === CLEFT (TOP) HANDLES ===
+		// Angle auto-widens as lobes spread: wider bulbs need more horizontal handles
+		let cleft_auto_widen = bulb_expand * 0.15;
+		let effective_cleft_angle = cleft_angle + cleft_auto_widen;
+		let (top_sin, top_cos) = effective_cleft_angle.sin_cos();
+		let top_handle_dir = DVec2::new(top_sin, -top_cos);
+		// Length proportional to distance, with slight boost for deeper clefts
+		let cleft_len_factor = 0.42 + cleft_depth * 0.08;
+		let top_right_len = dist_top_right * cleft_len_factor;
+		let top_left_len = dist_left_top * cleft_len_factor;
+
+		// === TIP (BOTTOM) HANDLES ===
+		// Angle auto-flattens as tip extends: longer tips need gentler approach curves
+		let tip_auto_flatten = tip_depth * 0.08;
+		let effective_tip_angle = tip_angle + tip_auto_flatten;
+		let (bot_sin, bot_cos) = effective_tip_angle.sin_cos();
+		let bot_handle_dir = DVec2::new(bot_sin, -bot_cos);
+		// Length proportional to distance, shorter for sharper tips
+		let tip_len_factor = 0.38 - tip_depth * 0.03;
+		let bot_right_len = dist_right_bottom * tip_len_factor.max(0.2);
+		let bot_left_len = dist_bottom_left * tip_len_factor.max(0.2);
+
+		// === LOBE (SIDE) HANDLES — collinear, 180° apart ===
+		// Direction: tangent perpendicular to radial from center
+		// Plumpness: wider lobes get proportionally longer handles for rounder curves
+		let plumpness = 1.0 + bulb_expand * 0.3;
+
+		// Right lobe: 1:3 ratio (in_handle = 1 part, out_handle = 3 parts)
+		let right_radial = (right_anchor - center).normalize_or(DVec2::new(1., -1.).normalize());
+		let right_tangent = DVec2::new(-right_radial.y, right_radial.x);
+		let right_span = (dist_top_right + dist_right_bottom) * 0.5 * 0.36 * plumpness;
+		let right_in = right_tangent * -(right_span * 0.25);
+		let right_out = right_tangent * (right_span * 0.75);
+
+		// Left lobe: 1:3 ratio (mirrors right)
+		let left_radial = (left_anchor - center).normalize_or(DVec2::new(-1., -1.).normalize());
+		let left_tangent = DVec2::new(-left_radial.y, left_radial.x);
+		let left_span = (dist_bottom_left + dist_left_top) * 0.5 * 0.36 * plumpness;
+		let left_in = left_tangent * -(left_span * 0.75);
+		let left_out = left_tangent * (left_span * 0.25);
+
+		// === ASSEMBLE ===
 
 		let manipulator_groups = vec![
-			ManipulatorGroup::new(top_anchor, Some(top_anchor + DVec2::new(-top_dir.x, top_dir.y)), Some(top_anchor + top_dir)),
-			ManipulatorGroup::new(right_anchor, Some(right_anchor + side_up), Some(right_anchor + side_down)),
-			ManipulatorGroup::new(bottom_anchor, Some(bottom_anchor + bot_dir), Some(bottom_anchor + DVec2::new(-bot_dir.x, bot_dir.y))),
-			ManipulatorGroup::new(left_anchor, Some(left_anchor + side_down), Some(left_anchor + side_up)),
+			// Cleft: handles mirror across Y axis
+			ManipulatorGroup::new(
+				top_anchor,
+				Some(top_anchor + DVec2::new(-top_handle_dir.x, top_handle_dir.y) * top_left_len),
+				Some(top_anchor + top_handle_dir * top_right_len),
+			),
+			// Right lobe: collinear handles
+			ManipulatorGroup::new(right_anchor, Some(right_anchor + right_in), Some(right_anchor + right_out)),
+			// Tip: handles mirror across Y axis
+			ManipulatorGroup::new(
+				bottom_anchor,
+				Some(bottom_anchor + bot_handle_dir * bot_right_len),
+				Some(bottom_anchor + DVec2::new(-bot_handle_dir.x, bot_handle_dir.y) * bot_left_len),
+			),
+			// Left lobe: collinear handles (mirrors right)
+			ManipulatorGroup::new(left_anchor, Some(left_anchor + left_in), Some(left_anchor + left_out)),
 		];
 
 		Self::new(manipulator_groups, true)
