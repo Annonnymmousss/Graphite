@@ -1,3 +1,4 @@
+use crate::messages::portfolio::document::utility_types::network_interface::InputConnector;
 use glam::{DVec2, IVec2};
 use graph_craft::document::NodeId;
 use graph_craft::document::value::TaggedValue;
@@ -151,6 +152,10 @@ pub enum ContextMenuData {
 	CreateNode {
 		#[serde(rename = "compatibleType")]
 		compatible_type: Option<String>,
+	},
+	WireHit {
+		#[serde(rename = "inputConnector")]
+		input_connector: InputConnector,
 	},
 }
 

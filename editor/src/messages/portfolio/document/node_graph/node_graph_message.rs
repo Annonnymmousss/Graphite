@@ -100,6 +100,12 @@ pub enum NodeGraphMessage {
 	PasteNodes {
 		serialized_nodes: String,
 	},
+	PasteNodeIntoWire {
+		serialized_nodes: String,
+		input_connector: InputConnector,
+		insert_x: i32,
+		insert_y: i32,
+	},
 	PointerDown {
 		shift_click: bool,
 		control_click: bool,

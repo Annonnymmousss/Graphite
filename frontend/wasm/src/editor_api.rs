@@ -763,6 +763,18 @@ impl EditorHandle {
 		self.dispatch(message);
 	}
 
+	/// Parses the system clipboard nodes and dispatches a PasteNodeIntoWire message using the provided input connector and pixel coordinates.
+	#[wasm_bindgen(js_name = pasteNodeIntoWire)]
+	pub fn paste_node_into_wire(&self, serialized_nodes: String, input_connector: JsValue, insert_x: i32, insert_y: i32) -> Result<(), JsValue> {
+		self.dispatch(NodeGraphMessage::PasteNodeIntoWire {
+			serialized_nodes,
+			input_connector: serde_wasm_bindgen::from_value(input_connector)?,
+			insert_x,
+			insert_y,
+		});
+		Ok(())
+	}
+
 	/// Pastes an image
 	#[wasm_bindgen(js_name = pasteImage)]
 	pub fn paste_image(

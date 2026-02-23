@@ -235,6 +235,30 @@
 						flush={true}
 					/>
 				</LayoutCol>
+			{:else if $nodeGraph.contextMenuInformation.contextMenuData.type === "WireHit"}
+				<LayoutCol class="modify-node-menu">
+					<TextButton
+						label="Paste"
+						action={async () => {
+							const contextMenuData = $nodeGraph.contextMenuInformation?.contextMenuData;
+							if (contextMenuData?.type !== "WireHit") return;
+
+							const inputConnector = contextMenuData.data.inputConnector;
+							const x = $nodeGraph.contextMenuInformation?.contextMenuCoordinates.x;
+							const y = $nodeGraph.contextMenuInformation?.contextMenuCoordinates.y;
+							if (x === undefined || y === undefined) return;
+
+							const clipboardText = await navigator.clipboard.readText();
+							const NODES_PREFIX = "graphite/nodes: ";
+							if (clipboardText.startsWith(NODES_PREFIX)) {
+								const serializedNodes = clipboardText.slice(NODES_PREFIX.length);
+								editor.handle.pasteNodeIntoWire(serializedNodes, inputConnector, x, y);
+							}
+							nodeGraph.closeContextMenu();
+						}}
+						flush={true}
+					/>
+				</LayoutCol>
 			{/if}
 		</FloatingMenu>
 	{/if}

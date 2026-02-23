@@ -744,6 +744,64 @@ impl<'a> MessageHandler<NodeGraphMessage, NodeGraphMessageContext<'a>> for NodeG
 				});
 				responses.add(NodeGraphMessage::SelectedNodesSet { nodes })
 			}
+			NodeGraphMessage::PasteNodeIntoWire {
+				serialized_nodes,
+				input_connector,
+				insert_x,
+				insert_y,
+			} => {
+				let data = match serde_json::from_str::<Vec<(NodeId, NodeTemplate)>>(&serialized_nodes) {
+					Ok(d) => d,
+					Err(e) => {
+						warn!("Invalid node data {e:?}");
+						return;
+					}
+				};
+				if data.is_empty() {
+					return;
+				}
+
+				responses.add(DocumentMessage::AddTransaction);
+
+				let new_ids: HashMap<_, _> = data.iter().map(|(id, _)| (*id, NodeId::new())).collect();
+				
+				let insert_pos = IVec2::new(insert_x / 24, insert_y / 24);
+				let offset = data.first()
+					.and_then(|(_, template)| template.persistent_node_metadata.node_type_metadata.position())
+					.map(|first_pos| insert_pos - first_pos)
+					.unwrap_or(IVec2::ZERO);
+
+				let Some((first_original_id, _)) = data.first() else {
+					warn!("Failed to retrieve first node from pasted data");
+					return;
+				};
+				let Some(&first_new_id) = new_ids.get(first_original_id) else {
+					warn!("Failed to map first pasted node to a new ID");
+					return;
+				};
+				let all_new_nodes: Vec<_> = new_ids.values().copied().collect();
+
+				responses.add(NodeGraphMessage::AddNodes { nodes: data, new_ids });
+				
+				if offset != IVec2::ZERO {
+					for new_node_id in &all_new_nodes {
+						responses.add(NodeGraphMessage::ShiftNodePosition { 
+							node_id: *new_node_id, 
+							x: offset.x, 
+							y: offset.y 
+						});
+					}
+				}
+
+				responses.add(NodeGraphMessage::InsertNodeBetween {
+					node_id: first_new_id,
+					input_connector,
+					insert_node_input_index: 0,
+				});
+				responses.add(NodeGraphMessage::SelectedNodesSet { nodes: all_new_nodes });
+				responses.add(NodeGraphMessage::RunDocumentGraph);
+				responses.add(NodeGraphMessage::SendGraph);
+			}
 			NodeGraphMessage::PointerDown {
 				shift_click,
 				control_click,
@@ -773,7 +831,10 @@ impl<'a> MessageHandler<NodeGraphMessage, NodeGraphMessageContext<'a>> for NodeG
 				let clicked_id = network_interface.node_from_click(click, selection_network_path);
 				let clicked_input = network_interface.input_connector_from_click(click, selection_network_path);
 				let clicked_output = network_interface.output_connector_from_click(click, selection_network_path);
-				let network_metadata = network_interface.network_metadata(selection_network_path).unwrap();
+				let node_graph_to_viewport_scale = network_interface
+					.network_metadata(selection_network_path)
+					.map(|m| m.persistent_metadata.navigation_metadata.node_graph_to_viewport.matrix2.x_axis.x)
+					.unwrap_or(1.);
 				// Create the add node popup on right click, then exit
 				if right_click {
 					// Abort dragging a node
@@ -814,6 +875,12 @@ impl<'a> MessageHandler<NodeGraphMessage, NodeGraphMessageContext<'a>> for NodeG
 							currently_is_node,
 							node_id,
 						}
+					} else if clicked_input.is_none() && clicked_output.is_none() {
+						if let Some(input_connector) = network_interface.wire_connection_from_click(node_graph_point, preferences.graph_wire_style, selection_network_path) {
+							ContextMenuData::WireHit { input_connector }
+						} else {
+							ContextMenuData::CreateNode { compatible_type: None }
+						}
 					} else {
 						ContextMenuData::CreateNode { compatible_type: None }
 					};
@@ -822,11 +889,11 @@ impl<'a> MessageHandler<NodeGraphMessage, NodeGraphMessageContext<'a>> for NodeG
 					let node_graph_shift = if matches!(context_menu_data, ContextMenuData::CreateNode { compatible_type: None }) {
 						let appear_right_of_mouse = if click.x > viewport.size().x() - 180. { -180. } else { 0. };
 						let appear_above_mouse = if click.y > viewport.size().y() - 200. { -200. } else { 0. };
-						DVec2::new(appear_right_of_mouse, appear_above_mouse) / network_metadata.persistent_metadata.navigation_metadata.node_graph_to_viewport.matrix2.x_axis.x
+						DVec2::new(appear_right_of_mouse, appear_above_mouse) / node_graph_to_viewport_scale
 					} else {
 						let appear_right_of_mouse = if click.x > viewport.size().x() - 173. { -173. } else { 0. };
 						let appear_above_mouse = if click.y > viewport.size().y() - 34. { -34. } else { 0. };
-						DVec2::new(appear_right_of_mouse, appear_above_mouse) / network_metadata.persistent_metadata.navigation_metadata.node_graph_to_viewport.matrix2.x_axis.x
+						DVec2::new(appear_right_of_mouse, appear_above_mouse) / node_graph_to_viewport_scale
 					};
 
 					self.context_menu = Some(ContextMenuInformation {

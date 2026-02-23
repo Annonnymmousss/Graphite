@@ -25,7 +25,7 @@ use graphene_std::subpath::Subpath;
 use graphene_std::transform::Footprint;
 use graphene_std::vector::click_target::{ClickTarget, ClickTargetType};
 use graphene_std::vector::{PointId, Vector, VectorModificationType};
-use kurbo::BezPath;
+use kurbo::{BezPath, ParamCurveNearest, Point};
 use memo_network::MemoNetwork;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2973,6 +2973,51 @@ impl NodeNetworkInterface {
 				.import_export_ports(network_path)
 				.and_then(|import_export_ports| import_export_ports.output_port_position(*import_index)),
 		}
+	}
+
+	pub fn wire_connection_from_click(&mut self, point: DVec2, graph_wire_style: GraphWireStyle, network_path: &[NodeId]) -> Option<InputConnector> {
+		const WIRE_HIT_THRESHOLD_SQ: f64 = 8. * 8.;
+		const NEAREST_ACCURACY: f64 = 1e-3;
+
+		let network = self.nested_network(network_path)?.clone();
+		let mut best: Option<(f64, InputConnector)> = None;
+
+		fn min_dist_sq(bez: BezPath, pt: Point, accuracy: f64) -> f64 {
+			bez.segments().map(|seg| seg.nearest(pt, accuracy).distance_sq).fold(f64::INFINITY, f64::min)
+		}
+
+		let pt = Point::new(point.x, point.y);
+
+		let node_inputs = network.nodes.iter().flat_map(|(node_id, node)| {
+			node.inputs.iter().enumerate().filter_map(move |(input_index, input)| {
+				matches!(input, NodeInput::Node { .. } | NodeInput::Import { .. })
+					.then(|| InputConnector::node(*node_id, input_index))
+			})
+		});
+		let all_inputs = node_inputs.chain(std::iter::once(InputConnector::Export(0)));
+
+		for input_connector in all_inputs {
+			let Some(upstream) = self.upstream_output_connector(&input_connector, network_path) else { continue };
+			let (Some(out_pos), Some(in_pos)) = (self.output_position(&upstream, network_path), self.input_position(&input_connector, network_path)) else { continue };
+
+			let is_out_layer = match &upstream {
+				OutputConnector::Node { node_id: oid, .. } => self.is_layer(oid, network_path),
+				_ => false,
+			};
+			let is_in_layer = match &input_connector {
+				InputConnector::Node { node_id, input_index: 0 } => self.is_layer(node_id, network_path),
+				_ => false,
+			};
+
+			let bez = build_vector_wire(out_pos, in_pos, is_out_layer, is_in_layer, graph_wire_style);
+			let dist_sq = min_dist_sq(bez, pt, NEAREST_ACCURACY);
+			
+			if dist_sq < WIRE_HIT_THRESHOLD_SQ && best.as_ref().map_or(true, |(best_d, _)| dist_sq < *best_d) {
+				best = Some((dist_sq, input_connector));
+			}
+		}
+
+		best.map(|(_, connector)| connector)
 	}
 
 	/// Get the combined bounding box of the click targets of the selected nodes in the node graph in viewport space
@@ -6320,6 +6365,24 @@ impl NodeTypePersistentMetadata {
 			position: LayerPosition::Absolute(position),
 			owned_nodes: TransientMetadata::default(),
 		})
+	}
+	pub fn position(&self) -> Option<IVec2> {
+		match self {
+			NodeTypePersistentMetadata::Node(n) => {
+				if let NodePosition::Absolute(pos) = n.position {
+					Some(pos)
+				} else {
+					None
+				}
+			}
+			NodeTypePersistentMetadata::Layer(l) => {
+				if let LayerPosition::Absolute(pos) = l.position {
+					Some(pos)
+				} else {
+					None
+				}
+			}
+		}
 	}
 }
 
