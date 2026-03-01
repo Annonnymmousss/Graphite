@@ -384,6 +384,43 @@ impl<PointId: Identifier> Subpath<PointId> {
 	}
 
 	pub fn new_heart(center: DVec2, radius: f64, cleft_angle: f64, tip_angle: f64, bulb_height: f64, bulb_expand: f64, cleft_depth: f64, tip_depth: f64) -> Self {
+		// === TUNING CONSTANTS (tweak these to adjust the heart shape) ===
+
+		// Lobe anchor Y position weights
+		const BULB_Y_CLEFT_WEIGHT: f64 = 0.88; // how much cleft_depth drives lobe Y
+		const BULB_Y_TIP_WEIGHT: f64 = 0.06; // how much tip_depth nudges lobe Y
+		const BULB_Y_HEIGHT_WEIGHT: f64 = 0.15; // how much bulb_height shifts lobe Y
+
+		// Lobe anchor X position
+		const BULB_X_BASE: f64 = 0.56; // base horizontal width factor
+		const BULB_X_HEIGHT_SCALE: f64 = 0.18; // how total_height scales width
+
+		// Bulb expand: diagonal movement angle (radians). PI/4 = 45 degrees
+		const EXPAND_ANGLE: f64 = std::f64::consts::FRAC_PI_4; // 45° diagonal
+
+		// Minimum inter-anchor distance factor (prevents degenerate handles)
+		const MIN_DIST_FACTOR: f64 = 0.1;
+
+		// Cleft (top) handle tuning
+		const CLEFT_AUTO_WIDEN_RATE: f64 = 0.0; // how fast cleft angle widens with bulb_expand (0 = no angle change)
+		const CLEFT_LEN_BASE: f64 = 0.32; // base cleft handle length factor
+		const CLEFT_LEN_DEPTH_BONUS: f64 = 0.08; // extra length per unit of cleft_depth
+
+		// Tip (bottom) handle tuning
+		const TIP_AUTO_FLATTEN_RATE: f64 = 0.08; // how fast tip angle flattens with tip_depth
+		const TIP_LEN_BASE: f64 = 0.28; // base tip handle length factor
+		const TIP_LEN_DEPTH_REDUCE: f64 = 0.03; // length reduction per unit of tip_depth
+		const TIP_LEN_MIN: f64 = 0.2; // minimum tip handle length factor
+
+		// Handle scaling with bulb_expand (applies to cleft, tip, and side handles)
+		const EXPAND_HANDLE_SCALE_RATE: f64 = 0.3; // how fast handles grow with bulb_expand
+
+		// Lobe (side) handle tuning
+		const LOBE_SPAN_FACTOR: f64 = 0.36; // base span multiplier for side handles
+		const LOBE_IN_RATIO: f64 = 0.25; // fraction of span for in-handle (toward cleft)
+		const LOBE_OUT_RATIO: f64 = 0.75; // fraction of span for out-handle (toward tip)
+		const LOBE_EXPAND_ROTATE_RATE: f64 = 0.15; // radians to rotate side handles per unit of bulb_expand
+
 		// === ANCHOR POSITIONS ===
 
 		// Cleft (top center, between the two lobes)
@@ -391,63 +428,63 @@ impl<PointId: Identifier> Subpath<PointId> {
 		// Tip (bottom center, pointed end)
 		let bottom_anchor = center + DVec2::new(0., radius * tip_depth);
 
-		// Lobe anchors — near the cleft, with gentle adaptation to other parameters
+		// Lobe anchors — expand diagonally at EXPAND_ANGLE
 		let total_height = cleft_depth + tip_depth;
-		// Y: primarily driven by cleft_depth, with mild adjustment for tip_depth
-		let bulb_y = radius * (cleft_depth * 0.88 + tip_depth * 0.06 + bulb_height * 0.15);
-		let lobe_anchor_y = center.y - bulb_y;
-		// X: base width with gentle total_height scaling to keep proportions
-		let bulb_x = radius * (0.56 + total_height * 0.18) * (1. + bulb_expand);
-		let right_anchor = DVec2::new(center.x + bulb_x, lobe_anchor_y);
-		let left_anchor = DVec2::new(center.x - bulb_x, lobe_anchor_y);
+		let bulb_y = radius * (cleft_depth * BULB_Y_CLEFT_WEIGHT + tip_depth * BULB_Y_TIP_WEIGHT + bulb_height * BULB_Y_HEIGHT_WEIGHT);
+		// Diagonal expansion: bulb_expand moves anchors along EXPAND_ANGLE
+		let expand_dx = radius * bulb_expand * EXPAND_ANGLE.cos();
+		let expand_dy = radius * bulb_expand * EXPAND_ANGLE.sin();
+		let base_bulb_x = radius * (BULB_X_BASE + total_height * BULB_X_HEIGHT_SCALE);
+		let lobe_anchor_y = center.y - bulb_y - expand_dy;
+		let right_anchor = DVec2::new(center.x + base_bulb_x + expand_dx, lobe_anchor_y);
+		let left_anchor = DVec2::new(center.x - base_bulb_x - expand_dx, lobe_anchor_y);
 
 		// === INTER-ANCHOR DISTANCES (drive handle lengths) ===
 
-		let dist_top_right = top_anchor.distance(right_anchor).max(radius * 0.1);
-		let dist_right_bottom = right_anchor.distance(bottom_anchor).max(radius * 0.1);
-		let dist_bottom_left = bottom_anchor.distance(left_anchor).max(radius * 0.1);
-		let dist_left_top = left_anchor.distance(top_anchor).max(radius * 0.1);
+		let dist_top_right = top_anchor.distance(right_anchor).max(radius * MIN_DIST_FACTOR);
+		let dist_right_bottom = right_anchor.distance(bottom_anchor).max(radius * MIN_DIST_FACTOR);
+		let dist_bottom_left = bottom_anchor.distance(left_anchor).max(radius * MIN_DIST_FACTOR);
+		let dist_left_top = left_anchor.distance(top_anchor).max(radius * MIN_DIST_FACTOR);
 
 		// === CLEFT (TOP) HANDLES ===
-		// Angle auto-widens as lobes spread: wider bulbs need more horizontal handles
-		let cleft_auto_widen = bulb_expand * 0.15;
+		let cleft_auto_widen = bulb_expand * CLEFT_AUTO_WIDEN_RATE;
 		let effective_cleft_angle = cleft_angle + cleft_auto_widen;
 		let (top_sin, top_cos) = effective_cleft_angle.sin_cos();
 		let top_handle_dir = DVec2::new(top_sin, -top_cos);
-		// Length proportional to distance, with slight boost for deeper clefts
-		let cleft_len_factor = 0.42 + cleft_depth * 0.08;
+		let expand_scale = 1.0 + bulb_expand * EXPAND_HANDLE_SCALE_RATE;
+		let cleft_len_factor = (CLEFT_LEN_BASE + cleft_depth * CLEFT_LEN_DEPTH_BONUS) * expand_scale;
 		let top_right_len = dist_top_right * cleft_len_factor;
 		let top_left_len = dist_left_top * cleft_len_factor;
 
 		// === TIP (BOTTOM) HANDLES ===
-		// Angle auto-flattens as tip extends: longer tips need gentler approach curves
-		let tip_auto_flatten = tip_depth * 0.08;
+		let tip_auto_flatten = tip_depth * TIP_AUTO_FLATTEN_RATE;
 		let effective_tip_angle = tip_angle + tip_auto_flatten;
 		let (bot_sin, bot_cos) = effective_tip_angle.sin_cos();
 		let bot_handle_dir = DVec2::new(bot_sin, -bot_cos);
-		// Length proportional to distance, shorter for sharper tips
-		let tip_len_factor = 0.38 - tip_depth * 0.03;
-		let bot_right_len = dist_right_bottom * tip_len_factor.max(0.2);
-		let bot_left_len = dist_bottom_left * tip_len_factor.max(0.2);
+		let tip_len_factor = (TIP_LEN_BASE - tip_depth * TIP_LEN_DEPTH_REDUCE) * expand_scale;
+		let bot_right_len = dist_right_bottom * tip_len_factor.max(TIP_LEN_MIN);
+		let bot_left_len = dist_bottom_left * tip_len_factor.max(TIP_LEN_MIN);
 
 		// === LOBE (SIDE) HANDLES — collinear, 180° apart ===
-		// Direction: tangent perpendicular to radial from center
-		// Plumpness: wider lobes get proportionally longer handles for rounder curves
-		let plumpness = 1.0 + bulb_expand * 0.3;
+		let plumpness = expand_scale; // reuse same scaling factor
+		let lobe_rotation = bulb_expand * LOBE_EXPAND_ROTATE_RATE;
+		let rotate_vec = DVec2::from_angle(lobe_rotation);
 
-		// Right lobe: 1:3 ratio (in_handle = 1 part, out_handle = 3 parts)
+		// Right lobe
 		let right_radial = (right_anchor - center).normalize_or(DVec2::new(1., -1.).normalize());
-		let right_tangent = DVec2::new(-right_radial.y, right_radial.x);
-		let right_span = (dist_top_right + dist_right_bottom) * 0.5 * 0.36 * plumpness;
-		let right_in = right_tangent * -(right_span * 0.25);
-		let right_out = right_tangent * (right_span * 0.75);
+		let right_tangent_base = DVec2::new(-right_radial.y, right_radial.x);
+		let right_tangent = DVec2::new(rotate_vec.x * right_tangent_base.x - rotate_vec.y * right_tangent_base.y, rotate_vec.y * right_tangent_base.x + rotate_vec.x * right_tangent_base.y);
+		let right_span = (dist_top_right + dist_right_bottom) * 0.5 * LOBE_SPAN_FACTOR * plumpness;
+		let right_in = right_tangent * -(right_span * LOBE_IN_RATIO);
+		let right_out = right_tangent * (right_span * LOBE_OUT_RATIO);
 
-		// Left lobe: 1:3 ratio (mirrors right)
+		// Left lobe (mirrors right)
 		let left_radial = (left_anchor - center).normalize_or(DVec2::new(-1., -1.).normalize());
-		let left_tangent = DVec2::new(-left_radial.y, left_radial.x);
-		let left_span = (dist_bottom_left + dist_left_top) * 0.5 * 0.36 * plumpness;
-		let left_in = left_tangent * -(left_span * 0.75);
-		let left_out = left_tangent * (left_span * 0.25);
+		let left_tangent_base = DVec2::new(-left_radial.y, left_radial.x);
+		let left_tangent = DVec2::new(rotate_vec.x * left_tangent_base.x + rotate_vec.y * left_tangent_base.y, -rotate_vec.y * left_tangent_base.x + rotate_vec.x * left_tangent_base.y);
+		let left_span = (dist_bottom_left + dist_left_top) * 0.5 * LOBE_SPAN_FACTOR * plumpness;
+		let left_in = left_tangent * -(left_span * LOBE_OUT_RATIO);
+		let left_out = left_tangent * (left_span * LOBE_IN_RATIO);
 
 		// === ASSEMBLE ===
 
