@@ -387,13 +387,15 @@ impl<PointId: Identifier> Subpath<PointId> {
 		// === TUNING CONSTANTS (tweak these to adjust the heart shape) ===
 
 		// Lobe anchor Y position weights
-		const BULB_Y_CLEFT_WEIGHT: f64 = 0.88; // how much cleft_depth drives lobe Y
+		const BULB_Y_BASE: f64 = 0.35; // base Y position factor for lobes
+		const BULB_Y_CLEFT_WEIGHT: f64 = 0.0; // how much cleft_depth drives lobe Y (0 keeps lobes stationary when cleft moves)
 		const BULB_Y_TIP_WEIGHT: f64 = 0.06; // how much tip_depth nudges lobe Y
 		const BULB_Y_HEIGHT_WEIGHT: f64 = 0.15; // how much bulb_height shifts lobe Y
 
 		// Lobe anchor X position
-		const BULB_X_BASE: f64 = 0.56; // base horizontal width factor
-		const BULB_X_HEIGHT_SCALE: f64 = 0.18; // how total_height scales width
+		const BULB_X_BASE: f64 = 0.63; // base horizontal width factor
+		const BULB_X_CLEFT_WEIGHT: f64 = 0.0; // how much cleft_depth scales width (0 keeps lobes stationary)
+		const BULB_X_TIP_WEIGHT: f64 = 0.18; // how much tip_depth scales width
 
 		// Bulb expand: diagonal movement angle (radians). PI/4 = 45 degrees
 		const EXPAND_ANGLE: f64 = std::f64::consts::FRAC_PI_4; // 45° diagonal
@@ -404,7 +406,7 @@ impl<PointId: Identifier> Subpath<PointId> {
 		// Cleft (top) handle tuning
 		const CLEFT_AUTO_WIDEN_RATE: f64 = 0.0; // how fast cleft angle widens with bulb_expand (0 = no angle change)
 		const CLEFT_LEN_BASE: f64 = 0.32; // base cleft handle length factor
-		const CLEFT_LEN_DEPTH_BONUS: f64 = 0.08; // extra length per unit of cleft_depth
+		const CLEFT_LEN_DEPTH_BONUS: f64 = 0.25; // extra length per unit of cleft_depth
 
 		// Tip (bottom) handle tuning
 		const TIP_AUTO_FLATTEN_RATE: f64 = 0.08; // how fast tip angle flattens with tip_depth
@@ -429,12 +431,11 @@ impl<PointId: Identifier> Subpath<PointId> {
 		let bottom_anchor = center + DVec2::new(0., radius * tip_depth);
 
 		// Lobe anchors — expand diagonally at EXPAND_ANGLE
-		let total_height = cleft_depth + tip_depth;
-		let bulb_y = radius * (cleft_depth * BULB_Y_CLEFT_WEIGHT + tip_depth * BULB_Y_TIP_WEIGHT + bulb_height * BULB_Y_HEIGHT_WEIGHT);
+		let bulb_y = radius * (BULB_Y_BASE + cleft_depth * BULB_Y_CLEFT_WEIGHT + tip_depth * BULB_Y_TIP_WEIGHT + bulb_height * BULB_Y_HEIGHT_WEIGHT);
 		// Diagonal expansion: bulb_expand moves anchors along EXPAND_ANGLE
 		let expand_dx = radius * bulb_expand * EXPAND_ANGLE.cos();
 		let expand_dy = radius * bulb_expand * EXPAND_ANGLE.sin();
-		let base_bulb_x = radius * (BULB_X_BASE + total_height * BULB_X_HEIGHT_SCALE);
+		let base_bulb_x = radius * (BULB_X_BASE + cleft_depth * BULB_X_CLEFT_WEIGHT + tip_depth * BULB_X_TIP_WEIGHT);
 		let lobe_anchor_y = center.y - bulb_y - expand_dy;
 		let right_anchor = DVec2::new(center.x + base_bulb_x + expand_dx, lobe_anchor_y);
 		let left_anchor = DVec2::new(center.x - base_bulb_x - expand_dx, lobe_anchor_y);
@@ -452,9 +453,13 @@ impl<PointId: Identifier> Subpath<PointId> {
 		let (top_sin, top_cos) = effective_cleft_angle.sin_cos();
 		let top_handle_dir = DVec2::new(top_sin, -top_cos);
 		let expand_scale = 1.0 + bulb_expand * EXPAND_HANDLE_SCALE_RATE;
-		let cleft_len_factor = (CLEFT_LEN_BASE + cleft_depth * CLEFT_LEN_DEPTH_BONUS) * expand_scale;
-		let top_right_len = dist_top_right * cleft_len_factor;
-		let top_left_len = dist_left_top * cleft_len_factor;
+		// Base length uses distance to lobes, but bonus uses absolute radius so it forces handles to grow as cleft goes down/up
+		let base_cleft_len = dist_top_right * CLEFT_LEN_BASE;
+		let depth_bonus_len = radius * cleft_depth.abs() * CLEFT_LEN_DEPTH_BONUS;
+		let top_right_len = (base_cleft_len + depth_bonus_len).max(radius * 0.01) * expand_scale;
+		
+		let base_cleft_left_len = dist_left_top * CLEFT_LEN_BASE;
+		let top_left_len = (base_cleft_left_len + depth_bonus_len).max(radius * 0.01) * expand_scale;
 
 		// === TIP (BOTTOM) HANDLES ===
 		let tip_auto_flatten = tip_depth * TIP_AUTO_FLATTEN_RATE;
