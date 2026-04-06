@@ -3,7 +3,7 @@ use core::cell::RefCell;
 use core_types::table::Table;
 use glam::DVec2;
 use parley::fontique::{Blob, FamilyId, FontInfo};
-use parley::{AlignmentOptions, FontContext, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty};
+use parley::{AlignmentOptions, FontContext, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty, WordBreakStrength};
 use std::collections::HashMap;
 use unicode_linebreak::BreakOpportunity;
 use vector_types::Vector;
@@ -295,6 +295,10 @@ impl TextContext {
 		builder.push_default(StyleProperty::FontWidth(font_info.width()));
 		builder.push_default(LineHeight::FontSizeRelative(typesetting.line_height_ratio as f32));
 
+		builder.push_default(StyleProperty::WordBreak(match typesetting.overflow_behavior {
+			OverflowBehavior::BreakAnywhere | OverflowBehavior::Ellipsis => WordBreakStrength::BreakAll,
+			OverflowBehavior::Overflow => WordBreakStrength::Normal,
+		}));
 		let mut layout: Layout<()> = builder.build(layout_text);
 
 		layout.break_all_lines(typesetting.max_width.map(|mw| mw as f32));
