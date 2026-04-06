@@ -8,6 +8,20 @@ pub use font_cache::*;
 pub use text_context::TextContext;
 pub use to_path::*;
 
+/// How the renderer handles text that cannot fit within `max_width`.
+#[repr(C)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash, DynAny, node_macro::ChoiceType)]
+pub enum OverflowBehavior {
+	/// Text extends beyond `max_width` without breaking (no-wrap / overflow).
+	Overflow,
+	/// Break at the nearest character boundary without inserting a hyphen (default).
+	#[default]
+	BreakAnywhere,
+	/// Clip to the last fully-visible line and append '\u{2026}' (…).
+	Ellipsis,
+}
+
 /// Alignment of lines of type within a text block.
 #[repr(C)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
@@ -43,6 +57,9 @@ pub struct TypesettingConfig {
 	pub max_height: Option<f64>,
 	pub tilt: f64,
 	pub align: TextAlign,
+	/// Controls how text that exceeds `max_width` is handled. Defaults to `BreakAnywhere`.
+	#[serde(default)]
+	pub overflow_behavior: OverflowBehavior,
 }
 
 impl Default for TypesettingConfig {
@@ -55,6 +72,7 @@ impl Default for TypesettingConfig {
 			max_height: None,
 			tilt: 0.,
 			align: TextAlign::default(),
+			overflow_behavior: OverflowBehavior::default(),
 		}
 	}
 }

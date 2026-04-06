@@ -13,7 +13,7 @@ use glam::{DAffine2, DVec2};
 use graphene_std::math::quad::Quad;
 use graphene_std::subpath::{self, Subpath};
 use graphene_std::table::Table;
-use graphene_std::text::{Font, TextAlign, TypesettingConfig};
+use graphene_std::text::{Font, OverflowBehavior, TextAlign, TypesettingConfig};
 use graphene_std::vector::click_target::ClickTargetType;
 use graphene_std::vector::misc::point_to_dvec2;
 use graphene_std::vector::{PointId, SegmentId, Vector};
@@ -1111,6 +1111,7 @@ impl OverlayContextInternal {
 			max_height: None,
 			tilt: 0.,
 			align: TextAlign::Left, // We'll handle alignment manually via pivot
+			overflow_behavior: OverflowBehavior::default(),
 		};
 
 		// Load Source Sans Pro font data

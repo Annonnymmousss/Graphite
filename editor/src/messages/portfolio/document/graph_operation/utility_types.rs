@@ -13,7 +13,7 @@ use graphene_std::raster::BlendMode;
 use graphene_std::raster_types::{CPU, Raster};
 use graphene_std::subpath::Subpath;
 use graphene_std::table::Table;
-use graphene_std::text::{Font, TypesettingConfig};
+use graphene_std::text::{Font, OverflowBehavior, TypesettingConfig};
 use graphene_std::vector::Vector;
 use graphene_std::vector::style::{Fill, Stroke};
 use graphene_std::vector::{PointId, VectorModificationType};
@@ -263,6 +263,8 @@ impl<'a> ModifyInputsContext<'a> {
 				Some(NodeInput::value(TaggedValue::F64(typesetting.max_height.unwrap_or(100.)), false)),
 				Some(NodeInput::value(TaggedValue::F64(typesetting.tilt), false)),
 				Some(NodeInput::value(TaggedValue::TextAlign(typesetting.align), false)),
+				Some(NodeInput::value(TaggedValue::Bool(false), false)), // separate_glyph_elements
+				Some(NodeInput::value(TaggedValue::OverflowBehavior(typesetting.overflow_behavior), false)),
 			]);
 		let transform = resolve_network_node_type("Transform").expect("Transform node does not exist").default_node_template();
 		let stroke = resolve_proto_node_type(graphene_std::vector_nodes::stroke::IDENTIFIER)

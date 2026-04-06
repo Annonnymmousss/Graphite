@@ -19,7 +19,7 @@ use crate::messages::tool::utility_types::ToolRefreshOptions;
 use graph_craft::document::value::TaggedValue;
 use graph_craft::document::{NodeId, NodeInput};
 use graphene_std::renderer::Quad;
-use graphene_std::text::{Font, FontCache, TextAlign, TypesettingConfig, lines_clipping};
+use graphene_std::text::{Font, FontCache, OverflowBehavior, TextAlign, TypesettingConfig, lines_clipping};
 use graphene_std::vector::style::Fill;
 use graphene_std::{Color, NodeInputDecleration};
 
@@ -904,6 +904,7 @@ impl Fsm for TextToolFsmState {
 						max_height: constraint_size.map(|size| size.y),
 						tilt: tool_options.tilt,
 						align: tool_options.align,
+						overflow_behavior: OverflowBehavior::default(),
 					},
 					font: Font::new(tool_options.font.font_family.clone(), tool_options.font.font_style.clone()),
 					color: tool_options.fill.active_color(),

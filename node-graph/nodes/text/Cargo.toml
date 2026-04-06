@@ -22,6 +22,7 @@ glam = { workspace = true }
 parley = { workspace = true }
 skrifa = { workspace = true }
 log = { workspace = true }
+unicode-linebreak = { workspace = true }
 
 # Optional workspace dependencies
 serde = { workspace = true, optional = true }
