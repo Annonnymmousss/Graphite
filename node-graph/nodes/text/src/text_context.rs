@@ -1,9 +1,9 @@
-use super::{Font, FontCache, OverflowBehavior, TypesettingConfig};
+use super::{Font, FontCache, TypesettingConfig};
 use core::cell::RefCell;
 use core_types::table::Table;
 use glam::DVec2;
 use parley::fontique::{Blob, FamilyId, FontInfo};
-use parley::{AlignmentOptions, FontContext, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty, WordBreakStrength};
+use parley::{AlignmentOptions, FontContext, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty};
 use std::collections::HashMap;
 use unicode_linebreak::BreakOpportunity;
 use vector_types::Vector;
@@ -255,12 +255,9 @@ impl TextContext {
 
 	/// Create a text layout using the specified font and typesetting configuration.
 	///
-	/// For `OverflowBehavior::BreakAnywhere` and `Ellipsis`, break opportunities
-	/// are collected via UAX #14 with semantic overrides and injected as ZWSP
-	/// characters before the text is handed to parley.  Parley naturally breaks
-	/// at ZWSP without inserting any hyphen.
-	///
-	/// For `OverflowBehavior::Overflow`, the text is passed unchanged (legacy).
+	/// If `max_width` is set, break opportunities are collected via UAX #14
+	/// with semantic overrides and injected as ZWSP characters before the text is handed
+	/// to parley.
 	fn layout_text(&mut self, text: &str, font: &Font, font_cache: &FontCache, typesetting: TypesettingConfig) -> Option<Layout<()>> {
 		// Note that the actual_font may not be the desired font if that font is not yet loaded.
 		// It is important not to cache the default font under the name of another font.
@@ -268,20 +265,14 @@ impl TextContext {
 		let (font_family, font_info) = self.get_font_info(actual_font, &font_data)?;
 
 		// Prepare the text we will actually hand to parley.
-		// For Overflow we pass the original; for the others we inject ZWSP break hints.
+		// We inject ZWSP break hints only when a max_width is set.
 		let injected: String;
-		let layout_text: &str = match typesetting.overflow_behavior {
-			OverflowBehavior::Overflow => text,
-			OverflowBehavior::BreakAnywhere | OverflowBehavior::Ellipsis => {
-				// Only inject when a max_width is set; otherwise there is nothing to wrap.
-				if typesetting.max_width.is_some() {
-					let breaks = collect_break_opportunities(text);
-					injected = build_injected_text(text, &breaks);
-					&injected
-				} else {
-					text
-				}
-			}
+		let layout_text: &str = if typesetting.max_width.is_some() {
+			let breaks = collect_break_opportunities(text);
+			injected = build_injected_text(text, &breaks);
+			&injected
+		} else {
+			text
 		};
 
 		const DISPLAY_SCALE: f32 = 1.;
@@ -295,10 +286,6 @@ impl TextContext {
 		builder.push_default(StyleProperty::FontWidth(font_info.width()));
 		builder.push_default(LineHeight::FontSizeRelative(typesetting.line_height_ratio as f32));
 
-		builder.push_default(StyleProperty::WordBreak(match typesetting.overflow_behavior {
-			OverflowBehavior::BreakAnywhere | OverflowBehavior::Ellipsis => WordBreakStrength::BreakAll,
-			OverflowBehavior::Overflow => WordBreakStrength::Normal,
-		}));
 		let mut layout: Layout<()> = builder.build(layout_text);
 
 		layout.break_all_lines(typesetting.max_width.map(|mw| mw as f32));
@@ -367,13 +354,6 @@ mod tests {
 	/// Helper: find the `BreakKind` for a given byte index, or `None` if absent.
 	fn kind_at(breaks: &[Break], byte_index: usize) -> Option<BreakKind> {
 		breaks.iter().find(|b| b.byte_index == byte_index).map(|b| b.kind)
-	}
-
-	// ── OverflowBehavior ─────────────────────────────────────────────────────
-
-	#[test]
-	fn overflow_behavior_default_is_break_anywhere() {
-		assert_eq!(OverflowBehavior::default(), OverflowBehavior::BreakAnywhere);
 	}
 
 	// ── URL / path characters ────────────────────────────────────────────────

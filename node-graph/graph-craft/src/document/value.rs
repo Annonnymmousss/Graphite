@@ -273,7 +273,6 @@ tagged_value! {
 	CentroidType(vector::misc::CentroidType),
 	BooleanOperation(vector::misc::BooleanOperation),
 	TextAlign(text_nodes::TextAlign),
-	OverflowBehavior(text_nodes::OverflowBehavior),
 	ScaleType(core_types::transform::ScaleType),
 }
 
@@ -413,16 +412,6 @@ impl TaggedValue {
 					() if ty == TypeId::of::<Table<GradientStops>>() => to_gradient(string).map(|color| TaggedValue::GradientTable(Table::new_from_element(color)))?,
 					() if ty == TypeId::of::<Fill>() => to_color(string).map(|color| TaggedValue::Fill(Fill::solid(color)))?,
 					() if ty == TypeId::of::<ReferencePoint>() => to_reference_point(string).map(TaggedValue::ReferencePoint)?,
-					() if ty == TypeId::of::<text_nodes::OverflowBehavior>() => {
-						let mut choices = string.split("::");
-						let (_first, second) = (choices.next()?, choices.next()?);
-						match second.trim() {
-							"Overflow" => TaggedValue::OverflowBehavior(text_nodes::OverflowBehavior::Overflow),
-							"BreakAnywhere" => TaggedValue::OverflowBehavior(text_nodes::OverflowBehavior::BreakAnywhere),
-							"Ellipsis" => TaggedValue::OverflowBehavior(text_nodes::OverflowBehavior::Ellipsis),
-							_ => { log::error!("Invalid OverflowBehavior variant: {string}"); return None; }
-						}
-					},
 					_ => return None,
 				};
 				Some(ty)

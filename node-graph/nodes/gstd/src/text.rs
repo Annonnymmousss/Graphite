@@ -61,9 +61,6 @@ fn text<'i: 'n>(
 	align: TextAlign,
 	/// Whether to split every letterform into its own vector path element. Otherwise, a single compound path is produced.
 	separate_glyph_elements: bool,
-	/// How to handle text that overflows *Max Width*: extend beyond it, break at a character boundary (default), or clip with an ellipsis.
-	#[default(OverflowBehavior::BreakAnywhere)]
-	overflow_behavior: OverflowBehavior,
 ) -> Table<Vector> {
 	let typesetting = TypesettingConfig {
 		font_size: size,
@@ -73,7 +70,6 @@ fn text<'i: 'n>(
 		max_height: has_max_height.then_some(max_height),
 		tilt,
 		align,
-		overflow_behavior,
 	};
 
 	to_path(&text, &font, &editor_resources.font_cache, typesetting, separate_glyph_elements)

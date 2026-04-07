@@ -13,7 +13,7 @@ use graphene_std::raster::BlendMode;
 use graphene_std::raster_types::{CPU, GPU, Raster};
 use graphene_std::subpath::Subpath;
 use graphene_std::table::Table;
-use graphene_std::text::{Font, OverflowBehavior, TypesettingConfig};
+use graphene_std::text::{Font, TypesettingConfig};
 use graphene_std::vector::misc::ManipulatorPointId;
 use graphene_std::vector::style::{Fill, Gradient};
 use graphene_std::vector::{PointId, SegmentId, VectorModificationType};
@@ -434,7 +434,6 @@ pub fn get_text(layer: LayerNodeIdentifier, network_interface: &NodeNetworkInter
 		character_spacing,
 		tilt,
 		align,
-		overflow_behavior: OverflowBehavior::default(),
 	};
 	Some((text, font, typesetting, per_glyph_instances))
 }
