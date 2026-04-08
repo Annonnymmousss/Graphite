@@ -16,9 +16,9 @@ thread_local! {
 	static THREAD_TEXT: RefCell<TextContext> = RefCell::new(TextContext::default());
 }
 
-/// TODO: swap to per-language selection once multi-language support lands.
 static EN_US_DICT: OnceLock<Standard> = OnceLock::new();
 
+/// TODO: swap to per-language selection once multi-language support lands.
 fn get_en_us_dict() -> Option<&'static Standard> {
 	EN_US_DICT
 		.get_or_init(|| Standard::from_embedded(Language::EnglishUS).expect("embed_all feature must be enabled"))
@@ -80,7 +80,7 @@ impl TextContext {
 		let (font_family, font_info) = self.get_font_info(actual_font, &font_data)?;
 
 		// Inject ZWSP so parley can wrap at meaningful boundaries.
-		// If hyphenation is enabled, also inject soft hyphens at syllable boundaries.(because parley doesn't support hyphenation)
+		// If hyphenation is enabled, also inject soft hyphens at syllable boundaries because parley doesn't support hyphenation.
 		let injected: String;
 		let layout_text = if typesetting.max_width.is_some() {
 			let semantic = inject_semantic_breaks(text);
@@ -191,6 +191,7 @@ fn build_parley_layout(
 }
 
 /// Resolve hyphen breaks in the given text based on the layout.
+/// Note: This function is a temporary solution until Parley adds native hyphenation support.
 fn resolve_hyphen_breaks(text: &str, layout: &Layout<()>) -> String {
 	const SOFT_HYPHEN: char = '\u{00AD}';
 	if !text.contains(SOFT_HYPHEN) {
