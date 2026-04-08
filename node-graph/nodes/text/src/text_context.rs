@@ -18,7 +18,7 @@ thread_local! {
 
 static EN_US_DICT: OnceLock<Standard> = OnceLock::new();
 
-/// TODO: swap to per-language selection once multi-language support lands.
+/// TODO: swap to per-language selection once multi-language support lands to reduce binary size.
 fn get_en_us_dict() -> Option<&'static Standard> {
 	EN_US_DICT
 		.get_or_init(|| Standard::from_embedded(Language::EnglishUS).expect("embed_all feature must be enabled"))
@@ -190,7 +190,6 @@ fn build_parley_layout(
 	b.build(text)
 }
 
-/// Resolve hyphen breaks in the given text based on the layout.
 /// Note: This function is a temporary solution until Parley adds native hyphenation support.
 fn resolve_hyphen_breaks(text: &str, layout: &Layout<()>) -> String {
 	const SOFT_HYPHEN: char = '\u{00AD}';
@@ -229,16 +228,16 @@ fn apply_hyphenation(text: &str) -> String {
 	let Some(dict) = get_en_us_dict() else {
 		return text.to_string();
 	};
-	const SOFT_HYPHEN: char = '\u{00AD}';
 	let mut out = String::with_capacity(text.len() + text.len() / 8);
 	let mut word_start: Option<usize> = None;
 
 	fn push_hyphenated(out: &mut String, dict: &hyphenation::Standard, word: &str) {
+		const SOFT_HYPHEN: char = '\u{00AD}';
 		let mut segs = dict.hyphenate(word).into_iter().segments().peekable();
 		while let Some(seg) = segs.next() {
 			out.push_str(seg);
 			if segs.peek().is_some() {
-				out.push('\u{00AD}');
+				out.push(SOFT_HYPHEN);
 			}
 		}
 	}
