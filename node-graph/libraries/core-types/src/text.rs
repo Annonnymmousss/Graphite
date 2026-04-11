@@ -41,8 +41,6 @@ pub enum LastLineAlign {
 	Left,
 	Center,
 	Right,
-	#[label("Justify")]
-	Justify,
 }
 
 impl LastLineAlign {
@@ -53,7 +51,6 @@ impl LastLineAlign {
 			Self::Left => None,
 			Self::Center => Some(parley::Alignment::Center),
 			Self::Right => Some(parley::Alignment::Right),
-			Self::Justify => Some(parley::Alignment::Justify),
 		}
 	}
 }

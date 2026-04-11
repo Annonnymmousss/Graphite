@@ -2532,7 +2532,20 @@ fn static_input_properties() -> InputProperties {
 	map.insert(
 		"last_line_align".to_string(),
 		Box::new(|node_id, index, context| {
-			let choices = enum_choice::<text::LastLineAlign>().for_socket(ParameterWidgetsInfo::new(node_id, index, true, context)).property_row();
+			let is_justify = context
+				.network_interface
+				.document_network()
+				.nodes
+				.get(&node_id)
+				.and_then(|node| node.inputs.get(graphene_std::text::text::AlignInput::INDEX))
+				.and_then(|input| input.as_value())
+				.map(|tagged_value| matches!(tagged_value, graph_craft::document::value::TaggedValue::TextAlign(graphene_std::text::TextAlign::JustifyLeft)))
+				.unwrap_or(false);
+
+			let choices = enum_choice::<text::LastLineAlign>()
+				.for_socket(ParameterWidgetsInfo::new(node_id, index, true, context))
+				.disabled(!is_justify)
+				.property_row();
 			Ok(vec![choices])
 		}),
 	);

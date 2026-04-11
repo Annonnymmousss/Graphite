@@ -243,24 +243,26 @@ fn create_text_widgets(tool: &TextTool, font_catalog: &FontCatalog) -> Vec<Widge
 		(LastLineAlign::Left, "Left"),
 		(LastLineAlign::Center, "Center"),
 		(LastLineAlign::Right, "Right"),
-		(LastLineAlign::Justify, "Justify"),
 	];
 	let last_line_entries: Vec<_> = last_line_variants
 		.into_iter()
 		.map(|(last_line_align, label)| {
-			RadioEntryData::new(format!("{last_line_align:?}")).label(label.to_string()).on_update(move |_| {
-				TextToolMessage::UpdateOptions {
-					options: TextOptionsUpdate::LastLineAlign(last_line_align),
-				}
-				.into()
-			})
+			let mut entry = RadioEntryData::new(format!("{last_line_align:?}")).label(label.to_string());
+			if is_justify {
+				entry = entry.on_update(move |_| {
+					TextToolMessage::UpdateOptions {
+						options: TextOptionsUpdate::LastLineAlign(last_line_align),
+					}
+					.into()
+				});
+			}
+			entry
 		})
 		.collect();
 	let last_line_selected = match tool.options.last_line_align {
 		LastLineAlign::Left => 0,
 		LastLineAlign::Center => 1,
 		LastLineAlign::Right => 2,
-		LastLineAlign::Justify => 3,
 	};
 	widgets.push(Separator::new(SeparatorStyle::Related).widget_instance());
 	widgets.push(RadioInput::new(last_line_entries).selected_index(Some(last_line_selected)).disabled(!is_justify).widget_instance());
