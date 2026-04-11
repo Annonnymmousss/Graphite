@@ -19,7 +19,7 @@ use crate::messages::tool::utility_types::ToolRefreshOptions;
 use graph_craft::document::value::TaggedValue;
 use graph_craft::document::{NodeId, NodeInput};
 use graphene_std::renderer::Quad;
-use graphene_std::text::{Font, FontCache, TextAlign, TypesettingConfig, lines_clipping};
+use graphene_std::text::{Font, FontCache, LastLineAlign, TextAlign, TypesettingConfig, lines_clipping};
 use graphene_std::vector::style::Fill;
 use graphene_std::{Color, NodeInputDecleration};
 
@@ -38,6 +38,7 @@ pub struct TextOptions {
 	fill: ToolColorOptions,
 	tilt: f64,
 	align: TextAlign,
+	last_line_align: LastLineAlign,
 }
 
 impl Default for TextOptions {
@@ -50,6 +51,7 @@ impl Default for TextOptions {
 			fill: ToolColorOptions::new_primary(),
 			tilt: 0.,
 			align: TextAlign::default(),
+			last_line_align: LastLineAlign::default(),
 		}
 	}
 }
@@ -85,6 +87,7 @@ pub enum TextOptionsUpdate {
 	FontSize(f64),
 	LineHeightRatio(f64),
 	Align(TextAlign),
+	LastLineAlign(LastLineAlign),
 	WorkingColors(Option<Color>, Option<Color>),
 }
 
@@ -204,7 +207,10 @@ fn create_text_widgets(tool: &TextTool, font_catalog: &FontCatalog) -> Vec<Widge
 			.into()
 		})
 		.widget_instance();
-	let align_entries: Vec<_> = [TextAlign::Left, TextAlign::Center, TextAlign::Right, TextAlign::JustifyLeft]
+	// Main alignment row: Left / Center / Right / Justify
+	// Clicking Justify defaults to JustifyLeft (last line left-aligned).
+	let main_align_variants = [TextAlign::Left, TextAlign::Center, TextAlign::Right, TextAlign::JustifyLeft];
+	let main_align_entries: Vec<_> = main_align_variants
 		.into_iter()
 		.map(|align| {
 			RadioEntryData::new(format!("{align:?}")).label(align.to_string()).on_update(move |_| {
@@ -215,8 +221,11 @@ fn create_text_widgets(tool: &TextTool, font_catalog: &FontCatalog) -> Vec<Widge
 			})
 		})
 		.collect();
-	let align = RadioInput::new(align_entries).selected_index(Some(tool.options.align as u32)).widget_instance();
-	vec![
+	// When any justify sub-variant is active, highlight the "Justify" (index 3) button.
+	let main_selected = if tool.options.align.is_justify() { 3 } else { tool.options.align as u32 };
+	let align = RadioInput::new(main_align_entries).selected_index(Some(main_selected)).widget_instance();
+
+	let mut widgets = vec![
 		font,
 		Separator::new(SeparatorStyle::Related).widget_instance(),
 		style,
@@ -226,7 +235,37 @@ fn create_text_widgets(tool: &TextTool, font_catalog: &FontCatalog) -> Vec<Widge
 		line_height_ratio,
 		Separator::new(SeparatorStyle::Related).widget_instance(),
 		align,
-	]
+	];
+
+	// Last-line alignment row — always shown, but entries are disabled when align is not Justify.
+	let is_justify = tool.options.align.is_justify();
+	let last_line_variants = [
+		(LastLineAlign::Left, "Left"),
+		(LastLineAlign::Center, "Center"),
+		(LastLineAlign::Right, "Right"),
+		(LastLineAlign::Justify, "Justify"),
+	];
+	let last_line_entries: Vec<_> = last_line_variants
+		.into_iter()
+		.map(|(last_line_align, label)| {
+			RadioEntryData::new(format!("{last_line_align:?}")).label(label.to_string()).on_update(move |_| {
+				TextToolMessage::UpdateOptions {
+					options: TextOptionsUpdate::LastLineAlign(last_line_align),
+				}
+				.into()
+			})
+		})
+		.collect();
+	let last_line_selected = match tool.options.last_line_align {
+		LastLineAlign::Left => 0,
+		LastLineAlign::Center => 1,
+		LastLineAlign::Right => 2,
+		LastLineAlign::Justify => 3,
+	};
+	widgets.push(Separator::new(SeparatorStyle::Related).widget_instance());
+	widgets.push(RadioInput::new(last_line_entries).selected_index(Some(last_line_selected)).disabled(!is_justify).widget_instance());
+
+	widgets
 }
 
 impl ToolRefreshOptions for TextTool {
@@ -290,7 +329,34 @@ impl<'a> MessageHandler<ToolMessage, &mut ToolActionMessageContext<'a>> for Text
 			}
 			TextOptionsUpdate::FontSize(font_size) => self.options.font_size = font_size,
 			TextOptionsUpdate::LineHeightRatio(line_height_ratio) => self.options.line_height_ratio = line_height_ratio,
-			TextOptionsUpdate::Align(align) => self.options.align = align,
+			TextOptionsUpdate::Align(align) => {
+				self.options.align = align;
+				// Sync the active editing text so the change is committed when editing ends.
+				if let Some(editing_text) = self.tool_data.editing_text.as_mut() {
+					editing_text.typesetting.align = align;
+				}
+				// Also directly update the selected text node so the change renders immediately.
+				if let Some(node_id) = graph_modification_utils::get_text_id(self.tool_data.layer, &context.document.network_interface) {
+					responses.add(NodeGraphMessage::SetInput {
+						input_connector: InputConnector::node(node_id, graphene_std::text::text::AlignInput::INDEX),
+						input: NodeInput::value(TaggedValue::TextAlign(align), false),
+					});
+					responses.add(NodeGraphMessage::RunDocumentGraph);
+				}
+			}
+			TextOptionsUpdate::LastLineAlign(last_line_align) => {
+				self.options.last_line_align = last_line_align;
+				if let Some(editing_text) = self.tool_data.editing_text.as_mut() {
+					editing_text.typesetting.last_line_align = last_line_align;
+				}
+				if let Some(node_id) = graph_modification_utils::get_text_id(self.tool_data.layer, &context.document.network_interface) {
+					responses.add(NodeGraphMessage::SetInput {
+						input_connector: InputConnector::node(node_id, graphene_std::text::text::LastLineAlignInput::INDEX),
+						input: NodeInput::value(TaggedValue::LastLineAlign(last_line_align), false),
+					});
+					responses.add(NodeGraphMessage::RunDocumentGraph);
+				}
+			}
 			TextOptionsUpdate::FillColor(color) => {
 				self.options.fill.custom_color = color;
 				self.options.fill.color_type = ToolColorType::Custom;
@@ -904,6 +970,7 @@ impl Fsm for TextToolFsmState {
 						max_height: constraint_size.map(|size| size.y),
 						tilt: tool_options.tilt,
 						align: tool_options.align,
+						last_line_align: tool_options.last_line_align,
 					},
 					font: Font::new(tool_options.font.font_family.clone(), tool_options.font.font_style.clone()),
 					color: tool_options.fill.active_color(),

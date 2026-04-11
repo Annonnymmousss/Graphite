@@ -6,7 +6,7 @@ use crate::messages::tool::common_functionality::shape_editor::{SelectedLayerSta
 use crate::messages::tool::tool_messages::tool_prelude::DocumentMessageHandler;
 use glam::{DAffine2, DVec2};
 use graphene_std::subpath::{Bezier, BezierHandles};
-use graphene_std::text::{Font, FontCache, TextAlign, TextContext, TypesettingConfig};
+use graphene_std::text::{Font, FontCache, LastLineAlign, TextAlign, TextContext, TypesettingConfig};
 use graphene_std::vector::misc::ManipulatorPointId;
 use graphene_std::vector::{PointId, SegmentId, Vector};
 use std::collections::HashMap;
@@ -242,6 +242,7 @@ pub fn text_width(text: &str, font_size: f64) -> f64 {
 		max_height: None,
 		tilt: 0.0,
 		align: TextAlign::Left,
+		last_line_align: LastLineAlign::Left,
 	};
 
 	// Load Source Sans Pro font data

@@ -263,6 +263,7 @@ tagged_value! {
 	CentroidType(vector::misc::CentroidType),
 	BooleanOperation(vector::misc::BooleanOperation),
 	TextAlign(text_nodes::TextAlign),
+	LastLineAlign(text_nodes::LastLineAlign),
 	ScaleType(core_types::transform::ScaleType),
 }
 

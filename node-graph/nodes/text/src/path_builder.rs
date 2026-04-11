@@ -64,8 +64,12 @@ impl<Upstream: Default + 'static> PathBuilder<Upstream> {
 		}
 	}
 
-	pub fn render_glyph_run(&mut self, glyph_run: &GlyphRun<'_, ()>, tilt: f64, per_glyph_instances: bool) {
-		let mut run_x = glyph_run.offset();
+	/// Renders a single glyph run into vector paths.
+	///
+	/// - `x_offset`: extra horizontal shift applied to the entire run (used for last-line center/right correction).
+	/// - `space_extra`: additional advance added after each whitespace glyph (used for force-justify last line).
+	pub fn render_glyph_run(&mut self, glyph_run: &GlyphRun<'_, ()>, tilt: f64, per_glyph_instances: bool, x_offset: f64, space_extra: f32) {
+		let mut run_x = glyph_run.offset() + x_offset as f32;
 		let run_y = glyph_run.baseline();
 
 		let run = glyph_run.run();
@@ -114,6 +118,9 @@ impl<Upstream: Default + 'static> PathBuilder<Upstream> {
 					self.origin = glyph_offset;
 				}
 				self.draw_glyph(&glyph_outline, font_size, &normalized_coords, glyph_offset, style_skew, skew, per_glyph_instances);
+			} else if space_extra != 0. {
+				// Space glyphs have no outline; distribute extra advance across them for force-justify.
+				run_x += space_extra;
 			}
 		}
 	}

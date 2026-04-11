@@ -422,6 +422,11 @@ pub fn get_text(layer: LayerNodeIdentifier, network_interface: &NodeNetworkInter
 	let Some(&TaggedValue::TextAlign(align)) = inputs[graphene_std::text::text::AlignInput::INDEX].as_value() else {
 		return None;
 	};
+	let last_line_align = inputs
+		.get(graphene_std::text::text::LastLineAlignInput::INDEX)
+		.and_then(|i| i.as_value())
+		.and_then(|v| if let &TaggedValue::LastLineAlign(a) = v { Some(a) } else { None })
+		.unwrap_or_default();
 	let Some(&TaggedValue::Bool(per_glyph_instances)) = inputs[graphene_std::text::text::SeparateGlyphElementsInput::INDEX].as_value() else {
 		return None;
 	};
@@ -434,6 +439,7 @@ pub fn get_text(layer: LayerNodeIdentifier, network_interface: &NodeNetworkInter
 		character_spacing,
 		tilt,
 		align,
+		last_line_align,
 	};
 	Some((text, font, typesetting, per_glyph_instances))
 }

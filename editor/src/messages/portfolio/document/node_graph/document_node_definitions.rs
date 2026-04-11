@@ -2529,6 +2529,13 @@ fn static_input_properties() -> InputProperties {
 			Ok(vec![choices])
 		}),
 	);
+	map.insert(
+		"last_line_align".to_string(),
+		Box::new(|node_id, index, context| {
+			let choices = enum_choice::<text::LastLineAlign>().for_socket(ParameterWidgetsInfo::new(node_id, index, true, context)).property_row();
+			Ok(vec![choices])
+		}),
+	);
 	map
 }
 

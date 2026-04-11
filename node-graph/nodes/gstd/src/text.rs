@@ -59,6 +59,10 @@ fn text<'i: 'n>(
 	/// To have an effect on a single line of text, *Max Width* must be set.
 	#[widget(ParsedWidgetOverride::Custom = "text_align")]
 	align: TextAlign,
+	/// The alignment of the last line when the main alignment is Justify.
+	/// Has no effect unless *Align* is set to *Justify*.
+	#[widget(ParsedWidgetOverride::Custom = "last_line_align")]
+	last_line_align: LastLineAlign,
 	/// Whether to split every letterform into its own vector path element. Otherwise, a single compound path is produced.
 	separate_glyph_elements: bool,
 ) -> Table<Vector> {
@@ -70,6 +74,7 @@ fn text<'i: 'n>(
 		max_height: has_max_height.then_some(max_height),
 		tilt,
 		align,
+		last_line_align,
 	};
 
 	to_path(&text, &font, &editor_resources.font_cache, typesetting, separate_glyph_elements)
