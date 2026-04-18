@@ -989,7 +989,10 @@ impl EditorWrapper {
 #[wasm_bindgen(js_name = evaluateMathExpression)]
 pub fn evaluate_math_expression(expression: &str) -> Option<f64> {
 	let value = math_parser::evaluate(expression)
-		.inspect_err(|err| error!("Math parser error on \"{expression}\": {err}"))
+		.inspect_err(|err| {
+			err.print();
+			error!("Math parser error on \"{expression}\"");
+		})
 		.ok()?
 		.inspect_err(|err| error!("Math evaluate error on \"{expression}\": {err} "))
 		.ok()?;

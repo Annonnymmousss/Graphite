@@ -129,15 +129,7 @@ where
 			rhs: Box::new(rhs),
 		});
 
-		// Chain comparisons like `a < b < c` by multiplying the boolean
-		// (1.0 / 0.0) results, preserving the existing semantics.
-		let chained_cmp = cmp.clone().foldl(cmp.repeated(), |lhs, rhs| Node::BinOp {
-			lhs: Box::new(lhs),
-			op: BinaryOp::Mul,
-			rhs: Box::new(rhs),
-		});
-
-		let and = chained_cmp.clone().foldl(and_op.then(chained_cmp).repeated(), |lhs, (op, rhs)| Node::BinOp {
+		let and = cmp.clone().foldl(and_op.then(cmp).repeated(), |lhs, (op, rhs)| Node::BinOp {
 			lhs: Box::new(lhs),
 			op,
 			rhs: Box::new(rhs),

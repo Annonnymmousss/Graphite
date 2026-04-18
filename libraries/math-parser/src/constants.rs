@@ -333,7 +333,18 @@ lazy_static! {
 			"root",
 			Box::new(|values| match values {
 				[Value::Number(Number::Real(x)), Value::Number(Number::Real(n))] => {
-					Some(Value::Number(Number::Real(x.powf(1.0 / *n))))
+					let result = if *n == 3.0 {
+						// cbrt correctly handles negative real cube roots
+						x.cbrt()
+					} else if *n == 2.0 {
+						x.sqrt()
+					} else if n.fract() == 0.0 && (*n as i64) % 2 != 0 && *x < 0.0 {
+						// Odd-degree root of negative: (-|x|)^(1/n) = -(|x|^(1/n))
+						-((-x).powf(1.0 / *n))
+					} else {
+						x.powf(1.0 / *n)
+					};
+					Some(Value::Number(Number::Real(result)))
 				}
 				[Value::Number(Number::Complex(x)), Value::Number(Number::Real(n))] => {
 					Some(Value::Number(Number::Complex(x.powf(1.0 / *n))))
@@ -363,20 +374,12 @@ lazy_static! {
 			"log2",
 			Box::new(|values| match values {
 				[Value::Number(Number::Real(real))] => Some(Value::Number(Number::Real(real.log2()))),
-				[Value::Number(Number::Complex(complex))] => Some(Value::Number(Number::Complex(complex / LN_2))),
+				[Value::Number(Number::Complex(complex))] => Some(Value::Number(Number::Complex(complex.ln() / num_complex::Complex::new(LN_2, 0.0)))),
 				_ => None,
 			}),
 		);
 
-		// Root Functions
-		map.insert(
-			"sqrt",
-			Box::new(|values| match values {
-				[Value::Number(Number::Real(real))] => Some(Value::Number(Number::Real(real.sqrt()))),
-				[Value::Number(Number::Complex(complex))] => Some(Value::Number(Number::Complex(complex.sqrt()))),
-				_ => None,
-			}),
-		);
+
 
 		map.insert(
 			"cbrt",

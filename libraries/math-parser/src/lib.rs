@@ -1,4 +1,3 @@
-#![allow(unused)]
 
 pub mod ast;
 mod constants;
@@ -41,7 +40,6 @@ mod tests {
 				panic!("failed to parse `{input}`");
 			}
 		};
-		dbg!(&expr);
 		let context = EvalContext::default();
 
 		let actual_value = match expr.eval(&context) {

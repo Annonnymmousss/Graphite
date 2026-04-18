@@ -46,10 +46,11 @@ fn math<T: num_traits::float::Float>(
 	#[default(1.)]
 	operand_b: T,
 ) -> T {
-	let (node, _unit) = match ast::Node::try_parse_from_str(&expression) {
+	let node = match ast::Node::try_parse_from_str(&expression) {
 		Ok(expr) => expr,
 		Err(e) => {
-			warn!("Invalid expression: `{expression}`\n{e:?}");
+			e.print();
+			warn!("Invalid expression: `{expression}`");
 			return T::from(0.).unwrap();
 		}
 	};
@@ -565,7 +566,7 @@ fn clamp<T: std::cmp::PartialOrd>(
 
 /// The greatest common divisor (GCD) calculates the largest positive integer that divides both of the two input numbers without leaving a remainder.
 #[node_macro::node(category("Math: Numeric"))]
-fn greatest_common_divisor<T: num_traits::int::PrimInt + std::ops::ShrAssign<i32> + std::ops::SubAssign>(
+fn greatest_common_divisor<T: num_traits::ToPrimitive + num_traits::FromPrimitive>(
 	_: impl Ctx,
 	/// One of the two numbers for which the GCD is calculated.
 	#[implementations(u32, u64, i32)]
@@ -574,18 +575,15 @@ fn greatest_common_divisor<T: num_traits::int::PrimInt + std::ops::ShrAssign<i32
 	#[implementations(u32, u64, i32)]
 	other_value: T,
 ) -> T {
-	if value == T::zero() {
-		return other_value;
-	}
-	if other_value == T::zero() {
-		return value;
-	}
-	binary_gcd(value, other_value)
+	let v1 = value.to_i128().unwrap_or(0).abs() as u128;
+	let v2 = other_value.to_i128().unwrap_or(0).abs() as u128;
+	let gcd = binary_gcd(v1, v2);
+	T::from_u128(gcd).unwrap()
 }
 
 /// The least common multiple (LCM) calculates the smallest positive integer that is a multiple of both of the two input numbers.
 #[node_macro::node(category("Math: Numeric"))]
-fn least_common_multiple<T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::identities::Zero>(
+fn least_common_multiple<T: num_traits::ToPrimitive + num_traits::FromPrimitive>(
 	_: impl Ctx,
 	/// One of the two numbers for which the LCM is calculated.
 	#[implementations(u32, u64, i32)]
@@ -594,38 +592,38 @@ fn least_common_multiple<T: num_traits::ToPrimitive + num_traits::FromPrimitive 
 	#[implementations(u32, u64, i32)]
 	other_value: T,
 ) -> T {
-	let value = value.to_i128().unwrap();
-	let other_value = other_value.to_i128().unwrap();
+	let v1 = value.to_i128().unwrap_or(0).abs() as u128;
+	let v2 = other_value.to_i128().unwrap_or(0).abs() as u128;
 
-	if value == 0 || other_value == 0 {
-		return T::zero();
+	if v1 == 0 || v2 == 0 {
+		return T::from_u128(0).unwrap();
 	}
-	let gcd = binary_gcd(value, other_value);
+	let gcd = binary_gcd(v1, v2);
 
-	T::from_i128((value * other_value).abs() / gcd).unwrap()
+	T::from_u128((v1 * v2) / gcd).unwrap()
 }
 
-fn binary_gcd<T: num_traits::int::PrimInt + std::ops::ShrAssign<i32> + std::ops::SubAssign>(mut a: T, mut b: T) -> T {
-	if a == T::zero() {
+fn binary_gcd(mut a: u128, mut b: u128) -> u128 {
+	if a == 0 {
 		return b;
 	}
-	if b == T::zero() {
+	if b == 0 {
 		return a;
 	}
 
 	let mut shift = 0;
-	while (a | b) & T::one() == T::zero() {
+	while (a | b) & 1 == 0 {
 		a >>= 1;
 		b >>= 1;
 		shift += 1;
 	}
 
-	while a & T::one() == T::zero() {
+	while a & 1 == 0 {
 		a >>= 1;
 	}
 
-	while b != T::zero() {
-		while b & T::one() == T::zero() {
+	while b != 0 {
+		while b & 1 == 0 {
 			b >>= 1;
 		}
 		if a > b {

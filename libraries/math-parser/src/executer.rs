@@ -44,8 +44,8 @@ impl Node {
 			}
 			Node::Conditional { condition, if_block, else_block } => {
 				let condition = match condition.eval(context)? {
-					Value::Number(Number::Real(number)) => number != 0.0,
-					Value::Number(Number::Complex(number)) => number != Complex::ZERO,
+					Value::Number(Number::Real(number)) => number.is_finite() && number != 0.0,
+					Value::Number(Number::Complex(number)) => number.re.is_finite() && number.im.is_finite() && number != Complex::ZERO,
 				};
 
 				if condition { if_block.eval(context) } else { else_block.eval(context) }

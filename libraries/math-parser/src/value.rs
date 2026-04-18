@@ -57,13 +57,13 @@ impl Number {
 			(Number::Real(lhs), Number::Real(rhs)) => {
 				let result = match op {
 					BinaryOp::And => {
-						let l = lhs != 0.0;
-						let r = rhs != 0.0;
+						let l = lhs.is_finite() && lhs != 0.0;
+						let r = rhs.is_finite() && rhs != 0.0;
 						if l && r { 1.0 } else { 0.0 }
 					}
 					BinaryOp::Or => {
-						let l = lhs != 0.0;
-						let r = rhs != 0.0;
+						let l = lhs.is_finite() && lhs != 0.0;
+						let r = rhs.is_finite() && rhs != 0.0;
 						if l || r { 1.0 } else { 0.0 }
 					}
 					BinaryOp::Add => lhs + rhs,
@@ -166,6 +166,10 @@ impl Number {
 						return Number::Real(f64::NAN);
 					}
 					let n = truncated as u64;
+					// f64 overflows at 171!, clamp early.
+					if n > 170 {
+						return Number::Real(f64::INFINITY);
+					}
 					let mut acc = 1.0_f64;
 					for k in 1..=n {
 						acc *= k as f64;

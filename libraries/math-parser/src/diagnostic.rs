@@ -21,9 +21,11 @@ impl CompileError {
 		let mut writer = StandardStream::stderr(ColorChoice::Auto);
 		let config = term::Config::default();
 		for diag in &self.diagnostics {
-			term::emit(&mut writer.lock(), &config, &self.file, diag).unwrap();
+			if let Err(e) = term::emit(&mut writer.lock(), &config, &self.file, diag) {
+				eprintln!("[math-parser] failed to emit diagnostic: {e}");
+			}
 		}
-		writer.flush();
+		let _ = writer.flush();
 	}
 
 	pub fn render_html(&self, config: &Config) -> Result<Vec<u8>, files::Error> {
