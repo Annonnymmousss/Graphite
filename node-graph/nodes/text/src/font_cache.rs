@@ -135,8 +135,8 @@ impl FontCache {
 	}
 
 	/// Iterate over all loaded fonts
-	pub fn iter_fonts(&self) -> impl Iterator<Item = (&str, std::sync::Arc<[u8]>)> {
-		self.font_file_data.iter().map(|(font, bytes)| (font.font_family.as_str(), std::sync::Arc::from(bytes.as_slice())))
+	pub fn iter_fonts(&self) -> impl Iterator<Item = (&str, &[u8])> {
+		self.font_file_data.iter().map(|(font, bytes)| (font.font_family.as_str(), bytes.as_slice()))
 	}
 }
 
