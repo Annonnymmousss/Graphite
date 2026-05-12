@@ -571,7 +571,7 @@ impl BoundingBox for Graphic {
 			Graphic::Graphic(list) => list.bounding_box(transform, include_stroke),
 			Graphic::Color(list) => list.bounding_box(transform, include_stroke),
 			Graphic::Gradient(list) => list.bounding_box(transform, include_stroke),
-			Graphic::Text(_) => RenderBoundingBox::None,
+			Graphic::Text(_) => RenderBoundingBox::Infinite,
 		}
 	}
 
@@ -583,7 +583,7 @@ impl BoundingBox for Graphic {
 			Graphic::Graphic(graphic) => graphic.thumbnail_bounding_box(transform, include_stroke),
 			Graphic::Color(color) => color.thumbnail_bounding_box(transform, include_stroke),
 			Graphic::Gradient(gradient) => gradient.thumbnail_bounding_box(transform, include_stroke),
-			Graphic::Text(_) => RenderBoundingBox::None,
+			Graphic::Text(_) => RenderBoundingBox::Infinite,
 		}
 	}
 }
