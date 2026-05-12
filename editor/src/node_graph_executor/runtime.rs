@@ -15,7 +15,7 @@ use graphene_std::ops::Convert;
 #[cfg(all(target_family = "wasm", feature = "gpu", feature = "wasm"))]
 use graphene_std::platform_application_io::canvas_utils::{Canvas, CanvasSurface, CanvasSurfaceHandle};
 use graphene_std::raster_types::Raster;
-use graphene_std::renderer::{Render, RenderParams, RenderSvgSegmentList, SvgRender, SvgSegment};
+use graphene_std::renderer::{Render, RenderParams, RenderSvgSegmentList, SvgRender, SvgSegment, set_render_fonts};
 use graphene_std::text::FontCache;
 use graphene_std::transform::RenderQuality;
 use graphene_std::vector::Vector;
@@ -394,6 +394,8 @@ impl NodeRuntime {
 
 	async fn execute_network(&mut self, render_config: RenderConfig) -> Result<TaggedValue, String> {
 		use graph_craft::graphene_compiler::Executor;
+
+		set_render_fonts(self.editor_api.font_cache.iter_fonts().map(|(family, bytes)| (family.to_string(), bytes)));
 
 		match self.executor.input_type() {
 			Some(t) if t == concrete!(RenderConfig) => (&self.executor).execute(render_config).await.map_err(|e| e.to_string()),

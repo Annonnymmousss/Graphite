@@ -133,6 +133,11 @@ impl FontCache {
 	pub fn insert(&mut self, font: Font, data: Vec<u8>) {
 		self.font_file_data.insert(font.clone(), data);
 	}
+
+	/// Iterate over all loaded fonts
+	pub fn iter_fonts(&self) -> impl Iterator<Item = (&str, std::sync::Arc<[u8]>)> {
+		self.font_file_data.iter().map(|(font, bytes)| (font.font_family.as_str(), std::sync::Arc::from(bytes.as_slice())))
+	}
 }
 
 // TODO: Eventually remove this migration document upgrade code

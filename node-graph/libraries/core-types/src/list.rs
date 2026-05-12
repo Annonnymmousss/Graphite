@@ -77,6 +77,12 @@ pub const ATTR_SPREAD_METHOD: &str = "spread_method";
 /// Gradient's `GradientType` (`Linear` or `Radial`).
 pub const ATTR_GRADIENT_TYPE: &str = "gradient_type";
 
+/// Text item's font family (`String`, implicit default `"sans-serif"`).
+pub const ATTR_FONT_FAMILY: &str = "font_family";
+
+/// Text item's font size in document-space units (`f64`, implicit default `16.`).
+pub const ATTR_FONT_SIZE: &str = "font_size";
+
 // ========================
 // TRAIT: AnyAttributeValue
 // ========================

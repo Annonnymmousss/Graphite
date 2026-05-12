@@ -335,6 +335,7 @@ impl TableItemLayout for Graphic {
 			Self::RasterGPU(list) => list.identifier(),
 			Self::Color(list) => list.identifier(),
 			Self::Gradient(list) => list.identifier(),
+			Self::Text(list) => list.identifier(),
 		}
 	}
 	// Don't put a breadcrumb for Graphic
@@ -349,6 +350,7 @@ impl TableItemLayout for Graphic {
 			Self::RasterGPU(list) => list.layout_with_breadcrumb(data),
 			Self::Color(list) => list.layout_with_breadcrumb(data),
 			Self::Gradient(list) => list.layout_with_breadcrumb(data),
+			Self::Text(list) => list.layout_with_breadcrumb(data),
 		}
 	}
 }
