@@ -78,6 +78,9 @@ impl Default for Font {
 pub struct FontCache {
 	/// Actual font file data used for rendering a font
 	font_file_data: HashMap<Font, Vec<u8>>,
+	/// Built once per `insert` call and never re-allocated.
+	#[cfg_attr(feature = "serde", serde(skip))]
+	arc_cache: HashMap<Font, Arc<[u8]>>,
 }
 
 impl std::fmt::Debug for FontCache {
@@ -131,12 +134,17 @@ impl FontCache {
 
 	/// Insert a new font into the cache
 	pub fn insert(&mut self, font: Font, data: Vec<u8>) {
+		let arc: Arc<[u8]> = Arc::from(data.as_slice());
+		self.arc_cache.insert(font.clone(), arc);
 		self.font_file_data.insert(font.clone(), data);
 	}
 
-	/// Iterate over all loaded fonts
-	pub fn iter_fonts(&self) -> impl Iterator<Item = (&str, &[u8])> {
-		self.font_file_data.iter().map(|(font, bytes)| (font.font_family.as_str(), bytes.as_slice()))
+	/// Iterate over all loaded fonts, yielding a zero-copy `Arc<[u8]>` reference to each font's bytes.
+	pub fn iter_fonts(&self) -> impl Iterator<Item = (&str, Arc<[u8]>)> {
+		self.font_file_data.iter().map(|(font, bytes)| {
+			let arc = self.arc_cache.get(font).cloned().unwrap_or_else(|| Arc::from(bytes.as_slice()));
+			(font.font_family.as_str(), arc)
+		})
 	}
 }
 
