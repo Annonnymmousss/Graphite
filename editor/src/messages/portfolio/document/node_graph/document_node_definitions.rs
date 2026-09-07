@@ -943,6 +943,45 @@ type InputProperties = HashMap<String, Box<dyn Fn(NodeId, usize, &mut NodeProper
 static INPUT_OVERRIDES: once_cell::sync::Lazy<InputProperties> = once_cell::sync::Lazy::new(static_input_properties);
 
 /// Defines the logic for inputs to display a custom Properties panel widget.
+/// A number input styled by the unit and bounds declared on a proto node's field, so a widget override doesn't have to
+/// restate what the node already says about the parameter. Custom number settings only exist on proto nodes, so a network
+/// node's parameter falls back to a plain number input.
+fn number_input_from_field(node_id: NodeId, index: usize, context: &NodePropertiesContext) -> NumberInput {
+	let node_metadata = registry::NODE_METADATA.lock().unwrap();
+	let mut number_input = NumberInput::default();
+
+	if let Some(field) = context
+		.network_interface
+		.implementation(&node_id, context.selection_network_path)
+		.and_then(|implementation| if let DocumentNodeImplementation::ProtoNode(id) = implementation { Some(id) } else { None })
+		.and_then(|proto_node_identifier| node_metadata.get(proto_node_identifier))
+		.and_then(|metadata| metadata.fields.get(index))
+	{
+		if let Some(unit) = field.unit {
+			number_input = number_input.unit(unit);
+		}
+		// Typing is clamped only by the hard bounds; the slider extent prefers the soft bounds (see `property_from_type`)
+		if let Some(hard_min) = field.number_hard_min {
+			number_input = number_input.min(hard_min);
+		}
+		if let Some(hard_max) = field.number_hard_max {
+			number_input = number_input.max(hard_max);
+		}
+		if field.number_mode_range {
+			number_input = number_input
+				.mode_range()
+				.range_min(field.number_soft_min.or(field.number_hard_min))
+				.range_max(field.number_soft_max.or(field.number_hard_max));
+		}
+		number_input = number_input.is_integer(false);
+		if let Some(number_step) = field.number_step {
+			number_input = number_input.step(number_step);
+		}
+	}
+
+	number_input
+}
+
 fn static_input_properties() -> InputProperties {
 	let mut map: InputProperties = HashMap::new();
 	map.insert("hidden".to_string(), Box::new(|_node_id, _index, _context| Ok(Vec::new())));
@@ -1036,36 +1075,7 @@ fn static_input_properties() -> InputProperties {
 		// The custom number input settings are only available on proto nodes
 		"optional_f64".to_string(),
 		Box::new(|node_id, index, context| {
-			let node_metadata = registry::NODE_METADATA.lock().unwrap();
-			let mut number_input = NumberInput::default();
-			if let Some(field) = context
-				.network_interface
-				.implementation(&node_id, context.selection_network_path)
-				.and_then(|implementation| if let DocumentNodeImplementation::ProtoNode(id) = implementation { Some(id) } else { None })
-				.and_then(|proto_node_identifier| node_metadata.get(proto_node_identifier))
-				.and_then(|metadata| metadata.fields.get(index))
-			{
-				if let Some(unit) = field.unit {
-					number_input = number_input.unit(unit);
-				}
-				// Typing is clamped only by the hard bounds; the slider extent prefers the soft bounds (see `property_from_type`)
-				if let Some(hard_min) = field.number_hard_min {
-					number_input = number_input.min(hard_min);
-				}
-				if let Some(hard_max) = field.number_hard_max {
-					number_input = number_input.max(hard_max);
-				}
-				if field.number_mode_range {
-					number_input = number_input
-						.mode_range()
-						.range_min(field.number_soft_min.or(field.number_hard_min))
-						.range_max(field.number_soft_max.or(field.number_hard_max));
-				}
-				number_input = number_input.is_integer(false);
-				if let Some(number_step) = field.number_step {
-					number_input = number_input.step(number_step);
-				}
-			};
+			let number_input = number_input_from_field(node_id, index, context);
 			// NOTE: The bool input MUST be at the input index directly before the f64 input!
 			Ok(vec![LayoutGroup::row(node_properties::optional_f64_widget(
 				ParameterWidgetsInfo::at_index(node_id, index, false, context),
@@ -1468,6 +1478,32 @@ fn static_input_properties() -> InputProperties {
 				.for_socket(ParameterWidgetsInfo::at_index(node_id, index, true, context))
 				.property_row();
 			Ok(vec![choices])
+		}),
+	);
+	// The three rows of the Text node's justification grid. Each is anchored on its minimum input, which is also where
+	// the row takes its label, unit, and bounds from, and draws the desired and maximum inputs of the same quantity beside it.
+	map.insert(
+		"word_spacing_justification".to_string(),
+		Box::new(|node_id, index, context| {
+			use graphene_std::text::text::{WordSpacingDesiredInput, WordSpacingMaximumInput};
+			let cells = [index, WordSpacingDesiredInput::INDEX, WordSpacingMaximumInput::INDEX];
+			Ok(node_properties::justification_row_widget(node_id, cells, number_input_from_field(node_id, index, context), context))
+		}),
+	);
+	map.insert(
+		"letter_spacing_justification".to_string(),
+		Box::new(|node_id, index, context| {
+			use graphene_std::text::text::{LetterSpacingInput, LetterSpacingMaximumInput};
+			let cells = [index, LetterSpacingInput::INDEX, LetterSpacingMaximumInput::INDEX];
+			Ok(node_properties::justification_row_widget(node_id, cells, number_input_from_field(node_id, index, context), context))
+		}),
+	);
+	map.insert(
+		"glyph_scaling_justification".to_string(),
+		Box::new(|node_id, index, context| {
+			use graphene_std::text::text::{GlyphScalingDesiredInput, GlyphScalingMaximumInput};
+			let cells = [index, GlyphScalingDesiredInput::INDEX, GlyphScalingMaximumInput::INDEX];
+			Ok(node_properties::justification_row_widget(node_id, cells, number_input_from_field(node_id, index, context), context))
 		}),
 	);
 	map

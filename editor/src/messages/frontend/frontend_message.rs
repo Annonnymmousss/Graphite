@@ -52,6 +52,12 @@ pub enum FrontendMessage {
 		align: String,
 		#[serde(rename = "alignLast")]
 		align_last: String,
+		#[serde(rename = "wordSpacing")]
+		word_spacing: f64,
+		#[serde(rename = "letterSpacing")]
+		letter_spacing: f64,
+		#[serde(rename = "glyphScaling")]
+		glyph_scaling: f64,
 	},
 	DisplayEditableTextboxUpdateFontData {
 		#[serde(rename = "fontData")]

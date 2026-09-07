@@ -1,3 +1,4 @@
+use super::LineJustification;
 use core_types::list::{Item, List};
 use core_types::{ATTR_EDITOR_CLICK_TARGET, ATTR_EDITOR_TEXT_FRAME, ATTR_TRANSFORM};
 use glam::{DAffine2, DVec2};
@@ -26,6 +27,8 @@ pub struct PathBuilder {
 	/// First glyph's baseline offset (pre-height-filter). Used for the empty placeholder item so
 	/// `local_transforms` stays stable when all glyphs are clipped during a resize drag.
 	first_glyph_offset: DVec2,
+	/// Horizontal scale of the glyph currently being drawn, from the fitted glyph scaling of the line it sits on.
+	glyph_scale: f64,
 	scale: f64,
 }
 
@@ -39,13 +42,16 @@ impl PathBuilder {
 			per_glyph_bboxes: Vec::new(),
 			text_frame_size,
 			first_glyph_offset,
+			glyph_scale: 1.,
 			scale,
 			origin: DVec2::default(),
 		}
 	}
 
+	/// Places one outline point of the glyph being drawn, horizontally scaled about the glyph's own origin (which
+	/// `origin` sits at, or is zero in per-glyph mode) so that glyph scaling widens the letterform, not its position.
 	fn point(&self, x: f32, y: f32) -> Point {
-		Point::new((self.origin.x + x as f64) * self.scale, (self.origin.y - y as f64) * self.scale)
+		Point::new((self.origin.x + x as f64 * self.glyph_scale) * self.scale, (self.origin.y - y as f64) * self.scale)
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -98,8 +104,16 @@ impl PathBuilder {
 		has_geometry
 	}
 
-	pub fn render_glyph_run(&mut self, glyph_run: &GlyphRun<'_, ()>, letter_tilt: f64, per_glyph_items: bool, x_offset: f32, space_extra: f32) {
-		let mut run_x = glyph_run.offset() + x_offset;
+	pub fn render_glyph_run(&mut self, glyph_run: &GlyphRun<'_, ()>, letter_tilt: f64, per_glyph_items: bool, justification: LineJustification) {
+		let LineJustification {
+			x_offset,
+			space_extra,
+			letter_extra,
+			glyph_scale,
+		} = justification;
+		self.glyph_scale = glyph_scale as f64;
+
+		let mut run_x = glyph_run.offset() * glyph_scale + x_offset;
 		let run_y = glyph_run.baseline();
 
 		let run = glyph_run.run();
@@ -139,8 +153,8 @@ impl PathBuilder {
 		let outlines = font_ref.outline_glyphs();
 
 		for glyph in glyph_run.glyphs() {
-			let glyph_offset = DVec2::new((run_x + glyph.x) as f64, (run_y - glyph.y) as f64);
-			run_x += glyph.advance;
+			let glyph_offset = DVec2::new((run_x + glyph.x * glyph_scale) as f64, (run_y - glyph.y) as f64);
+			run_x += glyph.advance * glyph_scale + letter_extra;
 
 			let glyph_id = GlyphId::from(glyph.id);
 			if let Some(glyph_outline) = outlines.get(glyph_id) {

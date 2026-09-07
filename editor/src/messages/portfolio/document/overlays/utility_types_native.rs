@@ -1083,12 +1083,8 @@ impl OverlayContextInternal {
 		// Create typesetting configuration
 		let typesetting = TypesettingConfig {
 			font_size: FONT_SIZE,
-			line_height_ratio: 1.2,
-			letter_spacing: 0.,
-			letter_tilt: 0.,
-			max_width: None,
-			max_height: None,
 			align: TextAlign::AlignLeft,
+			..TypesettingConfig::default()
 		};
 
 		// Lay out the text once, taking its dimensions and vector paths from the same thread-local context pass

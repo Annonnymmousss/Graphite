@@ -1,6 +1,6 @@
 use core_types::consts::{DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT};
 use core_types::list::{Item, List};
-use core_types::{ATTR_FONT, ATTR_FONT_SIZE, ATTR_LETTER_SPACING, ATTR_LETTER_TILT, ATTR_LINE_HEIGHT, ATTR_MAX_HEIGHT, ATTR_MAX_WIDTH, ATTR_TEXT_ALIGN, Ctx};
+use core_types::{ATTR_FONT, ATTR_FONT_SIZE, ATTR_JUSTIFICATION, ATTR_LETTER_TILT, ATTR_LINE_HEIGHT, ATTR_MAX_HEIGHT, ATTR_MAX_WIDTH, ATTR_TEXT_ALIGN, Ctx};
 use graph_craft::application_io::resource::Resource;
 use graphic_types::Vector;
 pub use text_nodes::*;
@@ -32,9 +32,12 @@ fn text(
 	#[step(0.1)]
 	#[default(1.2)]
 	line_height: Item<f64>,
-	/// Additional spacing, in pixels, added between each character.
-	#[unit(" px")]
+	/// Desired spacing between characters, as a percentage of the font's natural space width. Shown as the middle cell of the *Letter Spacing* justification row.
+	#[name("Letter Spacing Desired")]
+	#[unit("%")]
 	#[step(0.1)]
+	#[hard(-100..500)]
+	#[widget(ParsedWidgetOverride::Hidden)]
 	letter_spacing: Item<f64>,
 	/// The angle of faux italic slant applied to each glyph.
 	#[unit("°")]
@@ -59,12 +62,71 @@ fn text(
 	/// The horizontal alignment of each line of text within its surrounding box. To have an effect on a single line of text, *Max Width* must be set.
 	#[widget(ParsedWidgetOverride::Custom = "text_align")]
 	align: Item<TextAlign>,
+	/// How narrow each space may be squeezed when a justified line is too long for its column, as a percentage of the font's own space width.
+	#[name("Word Spacing")]
+	#[unit("%")]
+	#[default(80.)]
+	#[hard(0..1000)]
+	#[widget(ParsedWidgetOverride::Custom = "word_spacing_justification")]
+	word_spacing_minimum: Item<f64>,
+	/// The width every space is set at, as a percentage of the font's own space width. Unlike the minimum and maximum, this applies to all text, not just justified lines.
+	#[unit("%")]
+	#[default(100.)]
+	#[hard(0..1000)]
+	#[widget(ParsedWidgetOverride::Hidden)]
+	word_spacing_desired: Item<f64>,
+	/// How wide each space may be stretched when a justified line falls short of its column, as a percentage of the font's own space width.
+	#[unit("%")]
+	#[default(133.)]
+	#[hard(0..1000)]
+	#[widget(ParsedWidgetOverride::Hidden)]
+	word_spacing_maximum: Item<f64>,
+	/// How far the spacing between characters may be tightened, as a percentage of the font's natural space width, when a justified line is too long for its column.
+	#[name("Letter Spacing")]
+	#[unit("%")]
+	#[step(0.1)]
+	#[default(0.)]
+	#[hard(-100..500)]
+	#[widget(ParsedWidgetOverride::Custom = "letter_spacing_justification")]
+	letter_spacing_minimum: Item<f64>,
+	/// How far the spacing between characters may be loosened, as a percentage of the font's natural space width, when a justified line falls short of its column.
+	#[unit("%")]
+	#[step(0.1)]
+	#[default(0.)]
+	#[hard(-100..500)]
+	#[widget(ParsedWidgetOverride::Hidden)]
+	letter_spacing_maximum: Item<f64>,
+	/// How narrow the glyphs themselves may be condensed when a justified line is too long for its column, as a percentage of their natural width.
+	#[name("Glyph Scaling")]
+	#[unit("%")]
+	#[default(100.)]
+	#[hard(50..200)]
+	#[widget(ParsedWidgetOverride::Custom = "glyph_scaling_justification")]
+	glyph_scaling_minimum: Item<f64>,
+	/// The horizontal scale every glyph is drawn at, as a percentage of its natural width. Unlike the minimum and maximum, this applies to all text, not just justified lines.
+	#[unit("%")]
+	#[default(100.)]
+	#[hard(50..200)]
+	#[widget(ParsedWidgetOverride::Hidden)]
+	glyph_scaling_desired: Item<f64>,
+	/// How wide the glyphs themselves may be expanded when a justified line falls short of its column, as a percentage of their natural width.
+	#[unit("%")]
+	#[default(100.)]
+	#[hard(50..200)]
+	#[widget(ParsedWidgetOverride::Hidden)]
+	glyph_scaling_maximum: Item<f64>,
 ) -> Item<String> {
 	let text = text.into_element();
 	let font = font.into_element();
 	let (size, line_height, letter_spacing, letter_tilt) = (*size.element(), *line_height.element(), *letter_spacing.element(), *letter_tilt.element());
 	let (has_max_width, max_width, has_max_height, max_height) = (*has_max_width.element(), *max_width.element(), *has_max_height.element(), *max_height.element());
 	let align = align.into_element();
+	let justification = Justification {
+		word_spacing: SpacingRange::new(*word_spacing_minimum.element(), *word_spacing_desired.element(), *word_spacing_maximum.element()),
+		letter_spacing: SpacingRange::new(*letter_spacing_minimum.element(), letter_spacing, *letter_spacing_maximum.element()),
+		glyph_scaling: SpacingRange::new(*glyph_scaling_minimum.element(), *glyph_scaling_desired.element(), *glyph_scaling_maximum.element()),
+	}
+	.validated();
 
 	let mut item = Item::new_from_element(text);
 
@@ -77,9 +139,6 @@ fn text(
 	if (line_height - DEFAULT_LINE_HEIGHT).abs() > f64::EPSILON {
 		item.set_attribute(ATTR_LINE_HEIGHT, line_height);
 	}
-	if letter_spacing != 0. {
-		item.set_attribute(ATTR_LETTER_SPACING, letter_spacing);
-	}
 	if letter_tilt != 0. {
 		item.set_attribute(ATTR_LETTER_TILT, letter_tilt);
 	}
@@ -91,6 +150,9 @@ fn text(
 	}
 	if align != TextAlign::default() {
 		item.set_attribute(ATTR_TEXT_ALIGN, align);
+	}
+	if justification != Justification::default() {
+		item.set_attribute(ATTR_JUSTIFICATION, justification);
 	}
 
 	item

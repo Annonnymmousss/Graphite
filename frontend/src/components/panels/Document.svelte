@@ -34,6 +34,19 @@
 	let textInput: undefined | HTMLDivElement = undefined;
 	let showTextInput: boolean;
 	let textInputMatrix: [number, number, number, number, number, number];
+	let textInputFontSize = 0;
+	let textInputWordSpacing = 100;
+	let textInputLetterSpacing = 0;
+
+	function applyTextInputSpacing() {
+		if (!textInput) return;
+		const context = window.document.createElement("canvas").getContext("2d");
+		if (!context) return;
+		context.font = `${textInputFontSize}px ${textInput.style.fontFamily || "sans-serif"}`;
+		const naturalSpace = context.measureText(" ").width;
+		textInput.style.wordSpacing = `${(naturalSpace * (textInputWordSpacing - 100)) / 100}px`;
+		textInput.style.letterSpacing = `${(naturalSpace * textInputLetterSpacing) / 100}px`;
+	}
 
 	// Scrollbars
 	let scrollbarPos = { x: 0.5, y: 0.5 };
@@ -373,16 +386,22 @@
 		// Make it so `maxHeight` is a multiple of `lineHeight`
 		const lineHeight = data.lineHeightRatio * data.fontSize;
 		let height = data.maxHeight === undefined ? "auto" : `${Math.floor(data.maxHeight / lineHeight) * lineHeight}px`;
+		const glyphScale = data.glyphScaling / 100;
+		textInputFontSize = data.fontSize;
+		textInputWordSpacing = data.wordSpacing;
+		textInputLetterSpacing = data.letterSpacing;
 
 		textInput.contentEditable = "true";
 		textInput.style.transformOrigin = "0 0";
-		textInput.style.width = data.maxWidth ? `${data.maxWidth}px` : "max-content";
+		textInput.style.transform = `scaleX(${glyphScale})`;
+		textInput.style.width = data.maxWidth ? `${data.maxWidth / glyphScale}px` : "max-content";
 		textInput.style.height = height;
 		textInput.style.lineHeight = `${data.lineHeightRatio}`;
 		textInput.style.fontSize = `${data.fontSize}px`;
 		textInput.style.color = data.color;
 		textInput.style.textAlign = data.align;
 		textInput.style.textAlignLast = data.alignLast;
+		applyTextInputSpacing();
 
 		textInput.oninput = () => {
 			if (!textInput) return;
@@ -394,9 +413,11 @@
 		if (data.fontData.length > 0 && data.fontData.buffer instanceof ArrayBuffer) {
 			const fontView = new Uint8Array(data.fontData.buffer, data.fontData.byteOffset, data.fontData.byteLength);
 			const face = new FontFace("text-font", fontView);
+			await face.load();
 			window.document.fonts.add(face);
 			addedFontFaces.push(face);
 			textInput.style.fontFamily = "text-font";
+			applyTextInputSpacing();
 		}
 
 		// Necessary to select contenteditable: https://stackoverflow.com/questions/6139107/programmatically-select-text-in-a-contenteditable-html-element/6150060#6150060
@@ -536,9 +557,11 @@
 			if (textInput && data.fontData.length > 0 && data.fontData.buffer instanceof ArrayBuffer) {
 				const fontView = new Uint8Array(data.fontData.buffer, data.fontData.byteOffset, data.fontData.byteLength);
 				const face = new FontFace("text-font", fontView);
+				await face.load();
 				window.document.fonts.add(face);
 				addedFontFaces.push(face);
 				textInput.style.fontFamily = "text-font";
+				applyTextInputSpacing();
 			}
 		});
 		subscriptions.subscribeFrontendMessage("DisplayEditableTextboxTransform", async (data) => {
@@ -700,7 +723,9 @@
 						{/if}
 						<div class="text-input" style:width={canvasWidthCSS} style:height={canvasHeightCSS} style:pointer-events={showTextInput ? "auto" : ""}>
 							{#if showTextInput}
-								<div bind:this={textInput} style:transform="matrix({textInputMatrix})" on:scroll={preventTextEditingScroll}></div>
+								<div class="text-input-position" style:transform="matrix({textInputMatrix})">
+									<div class="text-input-editor" bind:this={textInput} on:scroll={preventTextEditingScroll}></div>
+								</div>
 							{/if}
 						</div>
 						{#if !$appWindow.viewportHolePunch}
@@ -954,7 +979,11 @@
 							}
 						}
 
-						.text-input div {
+						.text-input-position {
+							transform-origin: 0 0;
+						}
+
+						.text-input-editor {
 							cursor: text;
 							background: none;
 							border: none;

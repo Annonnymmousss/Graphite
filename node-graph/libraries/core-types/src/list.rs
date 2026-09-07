@@ -111,8 +111,6 @@ pub const ATTR_FONT_SIZE: &str = "font_size";
 pub const ATTR_FONT: &str = "font";
 /// Text item's line height as a ratio of the font size (`f64`, implicit default `1.2`).
 pub const ATTR_LINE_HEIGHT: &str = "line_height";
-/// Text item's extra spacing between letters in document-space units (`f64`, implicit default `0.`).
-pub const ATTR_LETTER_SPACING: &str = "letter_spacing";
 /// Text item's maximum line-wrap width in document-space units (`Option<f64>`, implicit default `None`).
 pub const ATTR_MAX_WIDTH: &str = "max_width";
 /// Text item's maximum block height in document-space units, past which lines are not drawn
@@ -122,6 +120,9 @@ pub const ATTR_MAX_HEIGHT: &str = "max_height";
 pub const ATTR_LETTER_TILT: &str = "letter_tilt";
 /// Text item's `TextAlign` horizontal alignment of lines within the block.
 pub const ATTR_TEXT_ALIGN: &str = "text_align";
+/// Text item's `Justification`: the letter spacing, word spacing, and glyph scaling every line is set with, and the
+/// ranges a justified line may stray into around them (implicit default `Justification::default()`).
+pub const ATTR_JUSTIFICATION: &str = "justification";
 
 // =====================
 // TYPE: NodeIdPath

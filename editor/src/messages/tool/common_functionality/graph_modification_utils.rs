@@ -10,7 +10,7 @@ use graph_craft::document::{DocumentNode, NodeId, NodeInput};
 use graphene_std::Color;
 use graphene_std::raster::BlendMode;
 use graphene_std::raster_types::Image;
-use graphene_std::text::{Font, TypesettingConfig};
+use graphene_std::text::{Font, Justification, TypesettingConfig};
 use graphene_std::vector::misc::ManipulatorPointId;
 use graphene_std::vector::style::{FillChoice, PaintOrder, StrokeAlign, StrokeCap, StrokeJoin, initial_gradient_transform_for_bounding_box};
 use graphene_std::vector::{Gradient, GradientForm, GradientRamp, GradientSettings, PointId, SegmentId, VectorModificationType};
@@ -610,9 +610,6 @@ pub fn get_text<'a>(
 	let Some(&TaggedValue::F64(line_height_ratio)) = parameters.value(text::LineHeightInput) else {
 		return None;
 	};
-	let Some(&TaggedValue::F64(letter_spacing)) = parameters.value(text::LetterSpacingInput) else {
-		return None;
-	};
 	let Some(&TaggedValue::Bool(has_max_width)) = parameters.value(text::HasMaxWidthInput) else {
 		return None;
 	};
@@ -628,14 +625,35 @@ pub fn get_text<'a>(
 	};
 	let Some(&TaggedValue::TextAlign(align)) = parameters.value(text::AlignInput) else { return None };
 
+	// Every justification value is a plain `f64` input, so the nine cells of the three ranges read back the same way. A cell
+	// driven from the graph has no value here and keeps its default, which is what the overlay is measured against anyway.
+	let mut justification = Justification::default();
+	let cells: [(ParameterRef, &mut f64); 9] = [
+		(text::WordSpacingMinimumInput.into(), &mut justification.word_spacing.minimum),
+		(text::WordSpacingDesiredInput.into(), &mut justification.word_spacing.desired),
+		(text::WordSpacingMaximumInput.into(), &mut justification.word_spacing.maximum),
+		(text::LetterSpacingMinimumInput.into(), &mut justification.letter_spacing.minimum),
+		(text::LetterSpacingInput.into(), &mut justification.letter_spacing.desired),
+		(text::LetterSpacingMaximumInput.into(), &mut justification.letter_spacing.maximum),
+		(text::GlyphScalingMinimumInput.into(), &mut justification.glyph_scaling.minimum),
+		(text::GlyphScalingDesiredInput.into(), &mut justification.glyph_scaling.desired),
+		(text::GlyphScalingMaximumInput.into(), &mut justification.glyph_scaling.maximum),
+	];
+	for (parameter, cell) in cells {
+		if let Some(&TaggedValue::F64(value)) = parameters.value(parameter) {
+			*cell = value;
+		}
+	}
+	let justification = justification.validated();
+
 	let typesetting = TypesettingConfig {
 		font_size,
 		line_height_ratio,
-		letter_spacing,
 		letter_tilt,
 		max_width: has_max_width.then_some(max_width),
 		max_height: has_max_height.then_some(max_height),
 		align,
+		justification,
 	};
 	Some((text, font, typesetting))
 }

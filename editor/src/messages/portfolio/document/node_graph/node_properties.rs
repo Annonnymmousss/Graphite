@@ -1029,6 +1029,62 @@ pub fn optional_f64_widget(parameter_widgets_info: ParameterWidgetsInfo, bool_in
 	widgets
 }
 
+/// One row of the Text node's justification grid: the labeled minimum, desired, and maximum of a single spacing quantity,
+/// laid out side by side the way Illustrator's Justification dialog presents them.
+///
+/// The row is anchored on the first of its `cells`, the minimum, which supplies the label and the socket since a row edits
+/// three inputs but occupies one property row. `number_props` styles all three cells alike, as they share a unit and range.
+pub(crate) fn justification_row_widget(node_id: NodeId, cells: [usize; 3], number_props: NumberInput, context: &mut NodePropertiesContext) -> Vec<LayoutGroup> {
+	let mut widgets = start_widgets(&ParameterWidgetsInfo::at_index(node_id, cells[0], true, context));
+	if widgets.is_empty() {
+		return Vec::new();
+	}
+
+	let Some(document_node) = context.network_interface.document_node(&node_id, context.selection_network_path) else {
+		return Vec::new();
+	};
+
+	let values = cells.map(|index| {
+		document_node.inputs.get(index).and_then(|input| input.as_non_exposed_value()).and_then(|value| match value {
+			TaggedValue::F64(value) => Some(*value),
+			_ => None,
+		})
+	});
+	let [Some(minimum), Some(desired), Some(maximum)] = values else {
+		return Vec::new();
+	};
+
+	for (cell, (index, value)) in cells.into_iter().zip([minimum, desired, maximum]).enumerate() {
+		let hard_minimum = number_props.min.unwrap_or(f64::NEG_INFINITY);
+		let hard_maximum = number_props.max.unwrap_or(f64::INFINITY);
+		let (minimum_bound, maximum_bound) = match cell {
+			0 => (hard_minimum, desired.clamp(hard_minimum, hard_maximum)),
+			1 => (minimum.min(maximum).clamp(hard_minimum, hard_maximum), minimum.max(maximum).clamp(hard_minimum, hard_maximum)),
+			_ => (desired.clamp(hard_minimum, hard_maximum), hard_maximum),
+		};
+		let label = ["Min", "Target", "Max"][cell];
+
+		// The first cell is separated from the label like any other property row's widget; the rest sit together as one control
+		widgets.extend_from_slice(&[
+			Separator::new(if cell == 0 { SeparatorStyle::Unrelated } else { SeparatorStyle::Related }).widget_instance(),
+			number_props
+				.clone()
+				.value(Some(value))
+				.label(label)
+				.min(minimum_bound)
+				.max(maximum_bound)
+				.min_width(1)
+				.max_width(80)
+				.narrow(true)
+				.on_update(update_value_at_index(|x: &NumberInput| TaggedValue::F64(x.value.unwrap()), node_id, index))
+				.on_commit(commit_value)
+				.widget_instance(),
+		]);
+	}
+
+	vec![LayoutGroup::row(widgets)]
+}
+
 pub fn number_widget(parameter_widgets_info: ParameterWidgetsInfo, number_props: NumberInput) -> Vec<WidgetInstance> {
 	let mut widgets = start_widgets(&parameter_widgets_info);
 

@@ -992,11 +992,17 @@ pub fn document_migration_string_preprocessing(document_serialized_content: Stri
 		.fold(document_serialized_content, |document_serialized_content, (old, new)| document_serialized_content.replace(old, new))
 }
 
+/// The count of legacy "Text" node inputs the current node still carries, ahead of the ones appended since. The legacy layout
+/// is those plus a trailing `separate_glyphs` toggle, which is what keeps it distinguishable as the current node grows.
+const LEGACY_TEXT_SHARED_INPUTS: usize = 12;
+
 /// Rebuilds the old 13-input "Text" node template from the current `text` template plus the trailing `separate_glyphs` input it dropped,
 /// so the staged input-count migrations can still upgrade old text nodes before the split.
 fn legacy_text_node_template() -> Option<NodeTemplate> {
 	let mut template = resolve_document_node_type(&DefinitionIdentifier::ProtoNode(graphene_std::text::text::IDENTIFIER))?.default_node_template();
 	template.implementation = NodeTemplateImplementation::ProtoNode(ProtoNodeIdentifier::new("graphene_std::text::TextNode"));
+	template.inputs.truncate(LEGACY_TEXT_SHARED_INPUTS);
+	template.input_metadata.truncate(LEGACY_TEXT_SHARED_INPUTS);
 	template.inputs.push(NodeInput::value(TaggedValue::Bool(false), false));
 	template.input_metadata.push(Default::default());
 	Some(template)
@@ -1286,15 +1292,19 @@ pub fn document_migration_upgrades(document: &mut DocumentMessageHandler, reset_
 	}
 
 	// The old geometry-producing "Text" node was split into the current "Text" (`String[]`) -> converter pair, which reuses the same proto
-	// identifier. Runs after `migrate_node` normalizes old text nodes to the legacy 13-input layout, distinguished from the current 12-input
-	// node by the trailing `separate_glyphs` input (index 12): forward inputs 0..=11 onto the new node and splice the matching converter after it.
+	// identifier. Runs after `migrate_node` normalizes old text nodes to the legacy 13-input layout, distinguished from the current node by
+	// the trailing `separate_glyphs` input (index 12): forward the shared inputs onto the new node and splice the matching converter after it.
 	let old_text_nodes: Vec<(NodeId, Vec<NodeId>)> = document
 		.network_interface
 		.document_network()
 		.recursive_nodes()
 		.filter_map(|(node_id, node, path)| {
 			// `separate_glyphs` is a `Bool` value or a wire feeding one; only a different value type there means a newer input, not the old node
-			let has_legacy_separate_glyphs = node.inputs.len() == 13 && node.inputs.get(12).is_some_and(|input| matches!(input.as_value(), None | Some(TaggedValue::Bool(_))));
+			let has_legacy_separate_glyphs = node.inputs.len() == LEGACY_TEXT_SHARED_INPUTS + 1
+				&& node
+					.inputs
+					.get(LEGACY_TEXT_SHARED_INPUTS)
+					.is_some_and(|input| matches!(input.as_value(), None | Some(TaggedValue::Bool(_))));
 			(has_legacy_separate_glyphs && document.network_interface.reference(node_id, &path) == Some(DefinitionIdentifier::ProtoNode(ProtoNodeIdentifier::new("graphene_std::text::TextNode"))))
 				.then_some((*node_id, path))
 		})
@@ -1303,7 +1313,7 @@ pub fn document_migration_upgrades(document: &mut DocumentMessageHandler, reset_
 		// Pre-load `outward_wires` so the splice below resolves the original downstream wiring from cache rather than a mutated state.
 		let _ = document.network_interface.outward_wires(network_path);
 
-		// Convert the old node in place to the current `text` node (12 inputs), capturing its old inputs.
+		// Convert the old node in place to the current `text` node, capturing its old inputs.
 		let Some(text_definition) = resolve_document_node_type(&DefinitionIdentifier::ProtoNode(graphene_std::text::text::IDENTIFIER)) else {
 			continue;
 		};
@@ -1315,14 +1325,14 @@ pub fn document_migration_upgrades(document: &mut DocumentMessageHandler, reset_
 		// The current `text` node reorders the legacy inputs (Letter Tilt moved up to sit right after Letter Spacing), so map each new
 		// input index to the legacy 13-input index it sources from. Legacy order:
 		// [primary, text, font, size, line_height, letter_spacing, has_max_width, max_width, has_max_height, max_height, letter_tilt, align, separate_glyphs].
-		const LEGACY_INPUT_FOR_NEW: [usize; 12] = [0, 1, 2, 3, 4, 5, 10, 6, 7, 8, 9, 11];
+		const LEGACY_INPUT_FOR_NEW: [usize; LEGACY_TEXT_SHARED_INPUTS] = [0, 1, 2, 3, 4, 5, 10, 6, 7, 8, 9, 11];
 		for (new_index, &legacy_index) in LEGACY_INPUT_FOR_NEW.iter().enumerate() {
 			if let Some(input) = old_inputs.get(legacy_index) {
 				document.network_interface.set_input(&InputConnector::node_at_index(*node_id, new_index), input.clone(), network_path);
 			}
 		}
 		// A `true` toggle at index 12 chose per-glyph geometry, which is now the dedicated "Text to Vector Glyphs" node
-		let separate_glyphs = matches!(old_inputs.get(12).and_then(|input| input.as_value()), Some(TaggedValue::Bool(true)));
+		let separate_glyphs = matches!(old_inputs.get(LEGACY_TEXT_SHARED_INPUTS).and_then(|input| input.as_value()), Some(TaggedValue::Bool(true)));
 
 		// Collect the inputs reading the old text node's output before any rewiring so the new node can be spliced onto those wires.
 		let downstream_consumers: Vec<InputConnector> = document
@@ -2162,6 +2172,18 @@ fn migrate_node(node_id: &NodeId, node: &DocumentNode, network_path: &[NodeId], 
 		}
 	}
 
+	// Append the Illustrator-style justification ranges, which only extend the node's input list:
+	// https://helpx.adobe.com/illustrator/desktop/design-with-text/edit-format-text/adjust-word-and-letterspacing-in-justified-text.html
+	if reference == DefinitionIdentifier::ProtoNode(graphene_std::text::text::IDENTIFIER) && inputs_count == LEGACY_TEXT_SHARED_INPUTS {
+		let mut node_template = resolve_document_node_type(&reference)?.default_node_template();
+		document.network_interface.replace_implementation(node_id, network_path, &mut node_template);
+
+		let old_inputs = document.network_interface.replace_inputs(node_id, network_path, &mut node_template)?;
+		for (index, input) in old_inputs.into_iter().enumerate() {
+			document.network_interface.set_input(&InputConnector::node_at_index(*node_id, index), input, network_path);
+		}
+	}
+
 	if reference == DefinitionIdentifier::ProtoNode(graphene_std::raster_nodes::std_nodes::noise_pattern::IDENTIFIER) && inputs_count == 15 {
 		let mut node_template = resolve_document_node_type(&reference)?.default_node_template();
 		document.network_interface.replace_implementation(node_id, network_path, &mut node_template);
@@ -2966,7 +2988,12 @@ mod tests {
 
 			let network = document.network_interface.document_network();
 			let text_node = network.nodes.get(&text_id).expect("the upgraded text node should keep its ID");
-			assert_eq!(text_node.inputs.len(), 12, "a {shape}-input text node should reach the current shape");
+			let current_inputs = resolve_proto_node_type(graphene_std::text::text::IDENTIFIER)
+				.expect("the Text node definition should exist")
+				.default_node_template()
+				.inputs
+				.len();
+			assert_eq!(text_node.inputs.len(), current_inputs, "a {shape}-input text node should reach the current shape");
 
 			// The converter is a new node, so it is found by identity rather than by ID
 			let converter = network

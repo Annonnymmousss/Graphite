@@ -7,13 +7,18 @@ mod text_context;
 mod to_path;
 
 use convert_case::{Boundary, Converter, pattern};
+use core_types::consts::{DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT};
 use core_types::graphene_hash::CacheHash;
 use core_types::list::{Item, List};
 use core_types::math::float_noise::round_away_float_noise;
 use core_types::registry::types::{SignedInteger, TextArea};
-use core_types::{CloneVarArgs, Context, Ctx, ExtractAll, ExtractVarArgs, OwnedContextImpl};
+use core_types::{
+	ATTR_FONT, ATTR_FONT_SIZE, ATTR_JUSTIFICATION, ATTR_LETTER_TILT, ATTR_LINE_HEIGHT, ATTR_MAX_HEIGHT, ATTR_MAX_WIDTH, ATTR_TEXT_ALIGN, CloneVarArgs, Context, Ctx, ExtractAll, ExtractVarArgs,
+	OwnedContextImpl,
+};
 use dyn_any::DynAny;
 use glam::{DAffine2, DVec2};
+use graphene_resource::Resource;
 use unicode_segmentation::UnicodeSegmentation;
 
 // Re-export for convenience
@@ -51,22 +56,29 @@ pub enum TextAlign {
 	JustifyAll,
 }
 
+/// The alignment parley lays the block out with. The justified modes lay out left-aligned because Graphite fits their lines
+/// itself, in [`for_each_styled_glyph_run`], to honor the [`Justification`] ranges that parley's own `Justify` — which only
+/// ever stretches spaces, without limit — cannot express.
 impl From<TextAlign> for parley::Alignment {
 	fn from(val: TextAlign) -> Self {
 		match val {
-			TextAlign::AlignLeft => parley::Alignment::Left,
 			TextAlign::AlignCenter => parley::Alignment::Center,
 			TextAlign::AlignRight => parley::Alignment::Right,
-			_ => parley::Alignment::Justify,
+			_ => parley::Alignment::Left,
 		}
 	}
 }
 
 impl TextAlign {
-	/// What `parley::Alignment` to apply as a post-correction to the last line of a paragraph, or `None` if parley's default already handles it.
+	/// Whether lines of this alignment are stretched to fill the column width, and so are fitted against the [`Justification`] ranges.
+	pub fn is_justified(self) -> bool {
+		matches!(self, Self::JustifyLeft | Self::JustifyCenter | Self::JustifyRight | Self::JustifyAll)
+	}
+
+	/// How the last line of a paragraph is placed, or `None` if it is simply left where the layout put it.
 	///
-	/// `JustifyLeft` returns `None` because parley already left-aligns the last line of a `Justify` layout. The other justify modes need
-	/// the last line shifted (`Center`/`Right`) or its inter-word spaces redistributed (`Justify` / `JustifyAll`).
+	/// `JustifyLeft` returns `None` because its last line stays flush left. The other justify modes need it shifted
+	/// (`Center`/`Right`) or fitted to the full column width like any other line (`Justify`, for `JustifyAll`).
 	pub fn last_line_correction(self) -> Option<parley::Alignment> {
 		match self {
 			Self::JustifyCenter => Some(parley::Alignment::Center),
@@ -90,30 +102,227 @@ impl TextAlign {
 	}
 }
 
+/// The range one spacing quantity may take while a justified line is fitted to its column width.
+///
+/// *Desired* is what every line is laid out with, justified or not; *minimum* and *maximum* only bound the compression
+/// and stretching a justified line adds on top of it.
+#[derive(PartialEq, Clone, Copy, Debug, CacheHash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SpacingRange {
+	pub minimum: f64,
+	pub desired: f64,
+	pub maximum: f64,
+}
+
+impl SpacingRange {
+	pub const fn new(minimum: f64, desired: f64, maximum: f64) -> Self {
+		Self { minimum, desired, maximum }
+	}
+
+	/// Clamps all three values to the supported domain and makes the minimum and maximum enclose the desired value.
+	/// This is a final line of defence for documents or graph inputs that bypass the Properties panel validation.
+	fn validated(self, domain_minimum: f64, domain_maximum: f64) -> Self {
+		let finite_or = |value: f64, fallback: f64| if value.is_finite() { value } else { fallback };
+		let desired = finite_or(self.desired, domain_minimum).clamp(domain_minimum, domain_maximum);
+		let minimum = finite_or(self.minimum, desired).clamp(domain_minimum, desired);
+		let maximum = finite_or(self.maximum, desired).clamp(desired, domain_maximum);
+		Self::new(minimum, desired, maximum)
+	}
+
+	/// How far the quantity may move below and above *desired*, where `per_unit` is what one unit of the range is worth
+	/// in drawn width. Callers validate the range first, so these bounds always enclose zero.
+	fn offsets(self, per_unit: f64) -> (f64, f64) {
+		((self.minimum - self.desired) * per_unit, (self.maximum - self.desired) * per_unit)
+	}
+
+	/// The same bounds as [`Self::offsets`] for a range read as a scale factor: a multiple of *desired* rather than an offset from it.
+	fn ratios(self) -> (f64, f64) {
+		(self.minimum / self.desired, self.maximum / self.desired)
+	}
+}
+
+/// How far a justified line may stretch or compress to reach its column width, mirroring Illustrator's Justification
+/// controls: word spacing and glyph scaling as percentages of the font's natural widths, and letter spacing as a
+/// percentage of the font's natural space width.
+///
+/// The defaults are Illustrator's own. They permit moderate word-space fitting while leaving letter spacing and glyph
+/// scaling at their natural values; a line that needs more adjustment keeps a ragged edge rather than exceeding a bound.
+///
+/// Reference: <https://helpx.adobe.com/illustrator/desktop/design-with-text/edit-format-text/adjust-word-and-letterspacing-in-justified-text.html>
+#[derive(PartialEq, Clone, Copy, Debug, CacheHash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Justification {
+	/// Width of each space glyph, as a percentage of the font's own space width.
+	pub word_spacing: SpacingRange,
+	/// Space inserted between glyphs, as a percentage of the font's own space width.
+	pub letter_spacing: SpacingRange,
+	/// Horizontal scale of the glyphs themselves, as a percentage of their natural width.
+	pub glyph_scaling: SpacingRange,
+}
+
+impl Default for Justification {
+	fn default() -> Self {
+		Self {
+			word_spacing: SpacingRange::new(80., 100., 133.),
+			letter_spacing: SpacingRange::new(0., 0., 0.),
+			glyph_scaling: SpacingRange::new(100., 100., 100.),
+		}
+	}
+}
+
+/// The spacing one line is drawn with once fitted: where its glyphs start, the advance each space and each glyph gains,
+/// and the horizontal scale of the glyphs.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub struct LineJustification {
+	pub x_offset: f32,
+	pub space_extra: f32,
+	pub letter_extra: f32,
+	pub glyph_scale: f32,
+}
+
+impl LineJustification {
+	/// A line drawn exactly as laid out, carrying only the desired glyph scaling the layout was measured against.
+	pub const fn unfitted(glyph_scale: f32) -> Self {
+		Self {
+			x_offset: 0.,
+			space_extra: 0.,
+			letter_extra: 0.,
+			glyph_scale,
+		}
+	}
+}
+
+impl Justification {
+	/// Applies Illustrator's supported value domains and guarantees `minimum <= desired <= maximum` for every range.
+	pub fn validated(self) -> Self {
+		Self {
+			word_spacing: self.word_spacing.validated(0., 1000.),
+			letter_spacing: self.letter_spacing.validated(-100., 500.),
+			glyph_scaling: self.glyph_scaling.validated(50., 200.),
+		}
+	}
+
+	/// The horizontal scale every line is drawn at before fitting, as a ratio.
+	pub fn desired_glyph_scale(self) -> f64 {
+		self.validated().glyph_scaling.desired / 100.
+	}
+
+	/// The narrowest horizontal glyph scale a justified line may use, as a ratio.
+	pub(crate) fn minimum_glyph_scale(self) -> f64 {
+		self.validated().glyph_scaling.minimum / 100.
+	}
+
+	/// The advance the desired word spacing adds to each space glyph, given the font's natural `space_advance`.
+	pub fn desired_word_offset(self, space_advance: f64) -> f64 {
+		space_advance * (self.validated().word_spacing.desired - 100.) / 100.
+	}
+
+	/// The advance the desired letter spacing adds between glyphs, given the font's natural `space_advance`.
+	pub fn desired_letter_offset(self, space_advance: f64) -> f64 {
+		space_advance * self.validated().letter_spacing.desired / 100.
+	}
+
+	/// The advance the minimum word spacing adds to each space glyph.
+	pub(crate) fn minimum_word_offset(self, space_advance: f64) -> f64 {
+		space_advance * (self.validated().word_spacing.minimum - 100.) / 100.
+	}
+
+	/// The advance the minimum letter spacing adds between glyphs.
+	pub(crate) fn minimum_letter_offset(self, space_advance: f64) -> f64 {
+		space_advance * self.validated().letter_spacing.minimum / 100.
+	}
+
+	/// Fits one line across the `free` width left over in its column. Word spacing, letter spacing, and glyph scaling all
+	/// move through their desired-to-minimum or desired-to-maximum ranges by the same proportion. This is the requested
+	/// inter-word versus inter-character ratio: widening one range gives that mechanism proportionally more influence.
+	/// If all available capacity is exhausted, the line remains short or long instead of violating a bound.
+	///
+	/// `advance` is the line's drawn glyph advance and `space_advance` the drawn width of the font's space glyph, both
+	/// excluding the trailing whitespace that hangs past the margin. The extras are shared over `spaces` space glyphs
+	/// and `gaps` inter-glyph gaps.
+	pub fn fit_line(self, free: f64, advance: f64, space_advance: f64, spaces: usize, gaps: usize) -> LineJustification {
+		let justification = self.validated();
+		let word_offsets = justification.word_spacing.offsets(space_advance / 100.);
+		let letter_offsets = justification.letter_spacing.offsets(space_advance / 100.);
+		let glyph_ratios = justification.glyph_scaling.ratios();
+
+		let choose = |bounds: (f64, f64)| if free < 0. { bounds.0 } else { bounds.1 };
+		let space_limit = choose(word_offsets);
+		let letter_limit = choose(letter_offsets);
+		let scale_limit = choose(glyph_ratios) - 1.;
+		let capacity = space_limit * spaces as f64 + letter_limit * gaps as f64 + scale_limit * advance;
+		let progress = if capacity.abs() > f64::EPSILON { (free / capacity).clamp(0., 1.) } else { 0. };
+
+		LineJustification {
+			x_offset: 0.,
+			space_extra: (space_limit * progress) as f32,
+			letter_extra: (letter_limit * progress) as f32,
+			glyph_scale: (justification.desired_glyph_scale() * (1. + scale_limit * progress)) as f32,
+		}
+	}
+}
+
 #[derive(PartialEq, Clone, Copy, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TypesettingConfig {
 	pub font_size: f64,
 	pub line_height_ratio: f64,
-	pub letter_spacing: f64,
 	pub letter_tilt: f64,
 	pub max_width: Option<f64>,
 	pub max_height: Option<f64>,
 	pub align: TextAlign,
+	pub justification: Justification,
 }
 
 impl Default for TypesettingConfig {
 	fn default() -> Self {
 		Self {
-			font_size: 24.,
-			line_height_ratio: 1.2,
-			letter_spacing: 0.,
+			font_size: DEFAULT_FONT_SIZE,
+			line_height_ratio: DEFAULT_LINE_HEIGHT,
 			letter_tilt: 0.,
 			max_width: None,
 			max_height: None,
 			align: TextAlign::default(),
+			justification: Justification::default(),
 		}
 	}
+}
+
+/// The typography attributes a styled string carries, read the same way by everything that draws one: the vector shaper,
+/// the SVG and Vello renderers, and the click-target pass.
+pub trait TextItemAttributes {
+	/// The attribute stored under `key`, or `default` if the item leaves it unset or stores another type there.
+	fn typography<T: Clone + 'static>(&self, key: &str, default: T) -> T;
+}
+
+impl TextItemAttributes for Item<String> {
+	fn typography<T: Clone + 'static>(&self, key: &str, default: T) -> T {
+		self.attribute_cloned_or(key, default)
+	}
+}
+
+impl TypesettingConfig {
+	/// Reads a text item's typography, falling back to each attribute's implicit default where the item leaves it unset.
+	pub fn from_text_item(item: &impl TextItemAttributes) -> Self {
+		let defaults = Self::default();
+
+		Self {
+			font_size: item.typography(ATTR_FONT_SIZE, defaults.font_size),
+			line_height_ratio: item.typography(ATTR_LINE_HEIGHT, defaults.line_height_ratio),
+			letter_tilt: item.typography(ATTR_LETTER_TILT, defaults.letter_tilt),
+			max_width: item.typography(ATTR_MAX_WIDTH, defaults.max_width),
+			max_height: item.typography(ATTR_MAX_HEIGHT, defaults.max_height),
+			align: item.typography(ATTR_TEXT_ALIGN, defaults.align),
+			justification: item.typography(ATTR_JUSTIFICATION, defaults.justification),
+		}
+	}
+}
+
+/// The font a text item is drawn with, substituting the built-in fallback when it carries none.
+pub fn text_item_font(item: &impl TextItemAttributes) -> Resource {
+	let font: Resource = item.typography(ATTR_FONT, Resource::default());
+
+	if font.is_empty() { FALLBACK_FONT_RESOURCE.clone() } else { font }
 }
 
 /// Converts escape sequence representations (`\n`, `\r`, `\t`, `\0`, `\\`) into their corresponding control characters.
@@ -890,4 +1099,205 @@ fn serialize<T: serde::Serialize>(_: impl Ctx, #[implementations(String, bool, f
 	let result = serde_json::to_string(&value).unwrap_or_else(|_| "Serialization Error".to_string());
 
 	Item::from_parts(result, attributes)
+}
+
+#[cfg(test)]
+mod justification_tests {
+	use super::*;
+	use core_types::ATTR_TRANSFORM;
+
+	/// How far right the ink of a text block reaches once shaped, which is what a justified line pushes to the margin.
+	fn drawn_right_edge(text: &str, typesetting: TypesettingConfig) -> f64 {
+		let shaped = to_path(text, &FALLBACK_FONT_RESOURCE, typesetting, false);
+		shaped.element(0).and_then(|vector| vector.bounding_box()).map_or(0., |bounds| bounds[1].x)
+	}
+
+	/// A paragraph long enough to wrap into several lines within `WRAP_WIDTH`, so it has non-final lines to justify.
+	const PARAGRAPH: &str = "The quick brown fox jumps over the lazy dog while the sun sets behind the distant hills";
+	const WRAP_WIDTH: f64 = 300.;
+
+	fn wrapped(align: TextAlign, justification: Justification) -> TypesettingConfig {
+		TypesettingConfig {
+			max_width: Some(WRAP_WIDTH),
+			align,
+			justification,
+			..TypesettingConfig::default()
+		}
+	}
+
+	fn line_count(text: &str, typesetting: TypesettingConfig) -> usize {
+		TextContext::with_thread_local(|context| context.layout_text(text, &FALLBACK_FONT_RESOURCE, typesetting).map_or(0, |layout| layout.line_count()))
+	}
+
+	#[test]
+	fn justified_lines_reach_the_margin_on_word_spacing_alone() {
+		let flexible_words = Justification {
+			word_spacing: SpacingRange::new(80., 100., 1000.),
+			..Justification::default()
+		};
+		let ragged = drawn_right_edge(PARAGRAPH, wrapped(TextAlign::AlignLeft, flexible_words));
+		let justified = drawn_right_edge(PARAGRAPH, wrapped(TextAlign::JustifyLeft, flexible_words));
+
+		// A left-aligned block ends wherever its longest line happens to end, short of the column it wraps within
+		assert!(ragged < WRAP_WIDTH - 1., "the ragged block should not fill the column, but reached {ragged}");
+		// Letter spacing and glyph scaling have no room, so word spacing alone has to fill the line
+		assert!(justified > WRAP_WIDTH - 5., "the justified block should fill the column, but reached {justified}");
+		assert!(justified <= WRAP_WIDTH, "the justified block should not overrun the column, but reached {justified}");
+	}
+
+	/// The distance between the first two glyphs of the block, which extra letter spacing opens up and extra word spacing does not.
+	fn first_glyph_gap(text: &str, typesetting: TypesettingConfig) -> f64 {
+		let shaped = to_path(text, &FALLBACK_FONT_RESOURCE, typesetting, true);
+		let glyph_x = |index| shaped.attribute_cloned_or_default::<DAffine2>(ATTR_TRANSFORM, index).translation.x;
+
+		glyph_x(1) - glyph_x(0)
+	}
+
+	#[test]
+	fn letter_spacing_takes_over_where_word_spacing_is_capped() {
+		// Word spacing pinned to its desired width has nothing to give, so letter spacing is the available fitting mechanism
+		let capped = Justification {
+			word_spacing: SpacingRange::new(100., 100., 100.),
+			..Justification::default()
+		};
+		let with_letter_spacing = Justification {
+			letter_spacing: SpacingRange::new(0., 0., 100.),
+			..capped
+		};
+
+		let natural = first_glyph_gap(PARAGRAPH, wrapped(TextAlign::JustifyLeft, capped));
+		let loosened = first_glyph_gap(PARAGRAPH, wrapped(TextAlign::JustifyLeft, with_letter_spacing));
+
+		assert!(loosened > natural + 0.5, "letter spacing should have opened the glyphs up: {loosened} vs {natural}");
+		assert!(
+			loosened <= natural + TypesettingConfig::default().font_size * 0.5 + 1e-3,
+			"letter spacing should stay within its maximum: {loosened} vs {natural}"
+		);
+	}
+
+	/// The drawn width of the block's first glyph, which fitted glyph scaling widens and the spacing ranges do not.
+	fn first_glyph_width(text: &str, typesetting: TypesettingConfig) -> f64 {
+		let shaped = to_path(text, &FALLBACK_FONT_RESOURCE, typesetting, true);
+
+		shaped.element(0).and_then(|glyph| glyph.bounding_box()).map_or(0., |bounds| bounds[1].x - bounds[0].x)
+	}
+
+	#[test]
+	fn glyph_scaling_takes_over_once_the_spacing_ranges_are_spent() {
+		let pinned = Justification {
+			word_spacing: SpacingRange::new(100., 100., 100.),
+			..Justification::default()
+		};
+		let stretchable = Justification {
+			glyph_scaling: SpacingRange::new(100., 100., 200.),
+			..pinned
+		};
+
+		let natural = first_glyph_width(PARAGRAPH, wrapped(TextAlign::JustifyLeft, pinned));
+		let stretched = first_glyph_width(PARAGRAPH, wrapped(TextAlign::JustifyLeft, stretchable));
+
+		assert!(stretched > natural * 1.01, "the glyphs themselves should have been widened: {stretched} vs {natural}");
+		assert!(stretched <= natural * 2. + 1e-3, "glyph scaling should stay within its maximum: {stretched} vs {natural}");
+	}
+
+	#[test]
+	fn a_column_that_cannot_be_filled_within_the_ranges_keeps_the_maximums() {
+		// Every range pinned to its desired value leaves no fitting room, so a line must remain short instead of
+		// silently overrunning the values the user requested.
+		let pinned = Justification {
+			word_spacing: SpacingRange::new(100., 100., 100.),
+			..Justification::default()
+		};
+
+		let edge = drawn_right_edge(PARAGRAPH, wrapped(TextAlign::JustifyLeft, pinned));
+
+		assert!(edge < WRAP_WIDTH - 5., "the justified block should retain a ragged edge when every range is pinned, but reached {edge}");
+	}
+
+	#[test]
+	fn minimum_word_spacing_changes_which_words_fit_on_a_line() {
+		let compressible = Justification {
+			word_spacing: SpacingRange::new(0., 500., 500.),
+			..Justification::default()
+		};
+		let pinned = Justification {
+			word_spacing: SpacingRange::new(500., 500., 500.),
+			..Justification::default()
+		};
+
+		let compressed_lines = line_count(PARAGRAPH, wrapped(TextAlign::JustifyLeft, compressible));
+		let pinned_lines = line_count(PARAGRAPH, wrapped(TextAlign::JustifyLeft, pinned));
+
+		assert!(
+			compressed_lines < pinned_lines,
+			"a lower minimum should keep more words on each line: {compressed_lines} vs {pinned_lines}"
+		);
+	}
+
+	#[test]
+	fn desired_glyph_scaling_condenses_the_block() {
+		let natural = drawn_right_edge("Hamburgefonstiv", TypesettingConfig::default());
+		let condensed = drawn_right_edge(
+			"Hamburgefonstiv",
+			TypesettingConfig {
+				justification: Justification {
+					glyph_scaling: SpacingRange::new(50., 50., 50.),
+					..Justification::default()
+				},
+				..TypesettingConfig::default()
+			},
+		);
+
+		assert!((condensed - natural * 0.5).abs() < 0.5, "half-scaled text should be half as wide: {condensed} vs {natural}");
+	}
+
+	#[test]
+	fn fitting_moves_all_enabled_ranges_by_the_same_proportion() {
+		let justification = Justification {
+			// One percentage point is worth a tenth of the 10-unit space, so this range gives each space 1 unit to spend
+			word_spacing: SpacingRange::new(100., 100., 110.),
+			letter_spacing: SpacingRange::new(0., 0., 5.),
+			glyph_scaling: SpacingRange::new(100., 100., 200.),
+		};
+
+		let fitted = justification.fit_line(100., 200., 10., 2, 3);
+		// Full expansion contributes 2 spaces × 1, 3 gaps × 0.5, and 200 units of glyph expansion.
+		let progress = 100. / 203.5;
+
+		assert!((fitted.space_extra as f64 - progress).abs() < 1e-6);
+		assert!((fitted.letter_extra as f64 - 0.5 * progress).abs() < 1e-6);
+		assert!((fitted.glyph_scale as f64 - (1. + progress)).abs() < 1e-6);
+	}
+
+	#[test]
+	fn a_line_that_cannot_be_filled_stops_at_the_maximums() {
+		// Only word spacing has any room, and far less than the line needs
+		let justification = Justification {
+			word_spacing: SpacingRange::new(100., 100., 110.),
+			letter_spacing: SpacingRange::new(0., 0., 0.),
+			glyph_scaling: SpacingRange::new(100., 100., 100.),
+		};
+
+		let fitted = justification.fit_line(100., 200., 10., 2, 3);
+
+		assert_eq!(fitted.space_extra, 1., "word spacing must stop at its configured maximum");
+		assert_eq!(fitted.letter_extra, 0.);
+		assert_eq!(fitted.glyph_scale, 1.);
+	}
+
+	#[test]
+	fn a_range_that_excludes_its_desired_value_is_safely_clamped() {
+		// Nonsense ranges (here a maximum under the desired value) must not drag every line off its desired spacing
+		let justification = Justification {
+			word_spacing: SpacingRange::new(50., 100., 60.),
+			letter_spacing: SpacingRange::new(4., 2., 3.),
+			glyph_scaling: SpacingRange::new(50., 100., 60.),
+		};
+
+		let fitted = justification.fit_line(100., 200., 10., 2, 3);
+
+		assert!(fitted.space_extra >= 0., "word spacing should not be forced below its desired width");
+		assert!(fitted.letter_extra >= 0., "letter spacing should not be forced below its desired width");
+		assert!(fitted.glyph_scale >= 1., "glyph scaling should not be forced below its desired width");
+	}
 }

@@ -22,7 +22,7 @@ use graph_craft::document::value::TaggedValue;
 use graph_craft::document::{NodeId, NodeInput};
 use graphene_std::color::SRGBA8;
 use graphene_std::renderer::Quad;
-use graphene_std::text::{Font, TextAlign, TypesettingConfig, lines_clipping};
+use graphene_std::text::{Font, Justification, SpacingRange, TextAlign, TypesettingConfig, lines_clipping};
 use graphene_std::vector::style::FillChoice;
 use graphene_std::{Color, NodeParameter};
 
@@ -478,6 +478,7 @@ impl TextToolData {
 	fn set_editing(&self, editable: bool, fonts: &FontsMessageHandler, responses: &mut VecDeque<Message>) {
 		if let Some(editing_text) = self.editing_text.as_ref().filter(|_| editable) {
 			let (align, align_last) = editing_text.typesetting.align.css();
+			let justification = editing_text.typesetting.justification.validated();
 			let font_data = fonts.get_resource_or_queue_load(&editing_text.font, responses).as_ref().to_vec().into();
 			responses.add(FrontendMessage::DisplayEditableTextbox {
 				text: editing_text.text.clone(),
@@ -490,6 +491,9 @@ impl TextToolData {
 				max_height: editing_text.typesetting.max_height,
 				align: align.to_string(),
 				align_last: align_last.to_string(),
+				word_spacing: justification.word_spacing.desired,
+				letter_spacing: justification.letter_spacing.desired,
+				glyph_scaling: justification.glyph_scaling.desired,
 			});
 		} else {
 			// Check if DisplayRemoveEditableTextbox is already in the responses queue
@@ -970,7 +974,13 @@ impl Fsm for TextToolFsmState {
 					transform: window_aligned_transform(document, start, DVec2::ONE),
 					typesetting: TypesettingConfig {
 						font_size: tool_options.font_size,
-						letter_spacing: tool_options.letter_spacing,
+						justification: Justification {
+							letter_spacing: SpacingRange {
+								desired: tool_options.letter_spacing,
+								..Justification::default().letter_spacing
+							},
+							..Justification::default()
+						},
 						letter_tilt: tool_options.letter_tilt,
 						max_width: constraint_size.map(|size| size.x),
 						max_height: constraint_size.map(|size| size.y),

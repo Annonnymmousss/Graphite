@@ -195,13 +195,21 @@ impl<'a> ModifyInputsContext<'a> {
 				Some(NodeInput::value(TaggedValue::Resource(font_resource_id), false)),
 				Some(NodeInput::value(TaggedValue::F64(typesetting.font_size), false)),
 				Some(NodeInput::value(TaggedValue::F64(typesetting.line_height_ratio), false)),
-				Some(NodeInput::value(TaggedValue::F64(typesetting.letter_spacing), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.letter_spacing.desired), false)),
 				Some(NodeInput::value(TaggedValue::F64(typesetting.letter_tilt), false)),
 				Some(NodeInput::value(TaggedValue::Bool(typesetting.max_width.is_some()), false)),
 				Some(NodeInput::value(TaggedValue::F64(typesetting.max_width.unwrap_or(100.)), false)),
 				Some(NodeInput::value(TaggedValue::Bool(typesetting.max_height.is_some()), false)),
 				Some(NodeInput::value(TaggedValue::F64(typesetting.max_height.unwrap_or(100.)), false)),
 				Some(NodeInput::value(TaggedValue::TextAlign(typesetting.align), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.word_spacing.minimum), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.word_spacing.desired), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.word_spacing.maximum), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.letter_spacing.minimum), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.letter_spacing.maximum), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.glyph_scaling.minimum), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.glyph_scaling.desired), false)),
+				Some(NodeInput::value(TaggedValue::F64(typesetting.justification.glyph_scaling.maximum), false)),
 			]);
 		let text_to_vector = resolve_proto_node_type(graphene_std::text::text_to_vector::IDENTIFIER)
 			.expect("Text to Vector node does not exist")

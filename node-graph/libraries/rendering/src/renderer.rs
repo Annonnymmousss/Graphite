@@ -6,7 +6,6 @@ use core_types::bounds::BoundingBox;
 use core_types::bounds::RenderBoundingBox;
 use core_types::color::Color;
 use core_types::color::SRGBA8;
-use core_types::consts::DEFAULT_FONT_SIZE;
 use core_types::list::ATTR_APPEARANCE;
 use core_types::list::{Item, List, NodeIdPath};
 use core_types::math::quad::Quad;
@@ -14,14 +13,12 @@ use core_types::render_complexity::RenderComplexity;
 use core_types::transform::Footprint;
 use core_types::uuid::{NodeId, generate_uuid};
 use core_types::{
-	ATTR_BACKGROUND, ATTR_BLEND_MODE, ATTR_CLIP, ATTR_CLIPPING_MASK, ATTR_DIMENSIONS, ATTR_EDITOR_CLICK_TARGET, ATTR_EDITOR_LAYER_PATH, ATTR_EDITOR_MERGED_LAYERS, ATTR_EDITOR_TEXT_FRAME, ATTR_FONT,
-	ATTR_FONT_SIZE, ATTR_GRADIENT_FORM, ATTR_LETTER_SPACING, ATTR_LETTER_TILT, ATTR_LINE_HEIGHT, ATTR_LOCATION, ATTR_MAX_HEIGHT, ATTR_MAX_WIDTH, ATTR_OPACITY, ATTR_OPACITY_FILL, ATTR_TEXT_ALIGN,
-	ATTR_TRANSFORM,
+	ATTR_BACKGROUND, ATTR_BLEND_MODE, ATTR_CLIP, ATTR_CLIPPING_MASK, ATTR_DIMENSIONS, ATTR_EDITOR_CLICK_TARGET, ATTR_EDITOR_LAYER_PATH, ATTR_EDITOR_MERGED_LAYERS, ATTR_EDITOR_TEXT_FRAME,
+	ATTR_GRADIENT_FORM, ATTR_LOCATION, ATTR_OPACITY, ATTR_OPACITY_FILL, ATTR_TRANSFORM,
 };
 use dyn_any::DynAny;
 use glam::{DAffine2, DMat2, DVec2};
 use graphene_hash::CacheHashWrapper;
-use graphene_resource::Resource;
 use graphic_types::raster_types::{BitmapMut, CPU, GPU, Image, Raster, Texture};
 use graphic_types::vector_types::gradient::{Gradient, GradientForm};
 use graphic_types::vector_types::vector::click_target::{ClickTarget, FreePoint};
@@ -39,6 +36,7 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
+use text_nodes::LineJustification;
 use vector_types::gradient::{GradientSettings, GradientSpread};
 use vello::*;
 
@@ -103,6 +101,12 @@ impl<'a, T> ItemRef<'a, T> {
 	/// The last layer ID of the item's `editor:layer_path` tag, if any.
 	fn layer(self) -> Option<NodeId> {
 		self.attribute::<NodeIdPath>(ATTR_EDITOR_LAYER_PATH).and_then(|path| path.0.iter_element_values().next_back().copied())
+	}
+}
+
+impl text_nodes::TextItemAttributes for ItemRef<'_, String> {
+	fn typography<A: Clone + 'static>(&self, key: &str, default: A) -> A {
+		self.attribute_cloned_or(key, default)
 	}
 }
 
@@ -2959,12 +2963,13 @@ struct GlyphOutlinePen<'a> {
 	ox: f64,
 	oy: f64,
 	tilt_tan: f64,
+	glyph_scale: f64,
 }
 
 impl GlyphOutlinePen<'_> {
 	#[inline]
 	fn px(&self, x: f32, y: f32) -> f64 {
-		self.ox + x as f64 + (y as f64 * self.tilt_tan)
+		self.ox + x as f64 * self.glyph_scale + (y as f64 * self.tilt_tan)
 	}
 
 	#[inline]
@@ -2991,10 +2996,17 @@ impl OutlinePen for GlyphOutlinePen<'_> {
 	}
 }
 
-/// Draws each glyph of `glyph_run` into a `BezPath` (with the run's position and faux-italic `tilt_tan` baked in)
-/// and calls `emit` for each non-empty glyph. Zero-geometry glyphs advance by `space_extra` for justified spacing.
-fn draw_glyph_run_to_bezpaths(glyph_run: &parley::GlyphRun<'_, ()>, x_offset: f32, space_extra: f32, tilt_tan: f64, mut emit: impl FnMut(&BezPath)) {
-	let mut run_x = glyph_run.offset() + x_offset;
+/// Draws each glyph of `glyph_run` into a `BezPath` (with the run's fitted position, horizontal scale, and faux-italic
+/// `tilt_tan` baked in) and calls `emit` for each non-empty glyph. Zero-geometry glyphs advance by the line's extra word
+/// spacing, the rest by its extra letter spacing.
+fn draw_glyph_run_to_bezpaths(glyph_run: &parley::GlyphRun<'_, ()>, justification: LineJustification, tilt_tan: f64, mut emit: impl FnMut(&BezPath)) {
+	let LineJustification {
+		x_offset,
+		space_extra,
+		letter_extra,
+		glyph_scale,
+	} = justification;
+	let mut run_x = glyph_run.offset() * glyph_scale + x_offset;
 	let run_y = glyph_run.baseline();
 	let run = glyph_run.run();
 	let font = run.font();
@@ -3006,16 +3018,22 @@ fn draw_glyph_run_to_bezpaths(glyph_run: &parley::GlyphRun<'_, ()>, x_offset: f3
 
 	let mut bez_path = BezPath::new();
 	for glyph in glyph_run.glyphs() {
-		let ox = (run_x + glyph.x) as f64;
+		let ox = (run_x + glyph.x * glyph_scale) as f64;
 		let oy = (run_y - glyph.y) as f64;
-		run_x += glyph.advance;
+		run_x += glyph.advance * glyph_scale + letter_extra;
 
 		let Some(outline) = outlines.get(GlyphId::from(glyph.id)) else { continue };
 		let settings = DrawSettings::unhinted(Size::new(font_size_pts), LocationRef::new(&normalized_coords));
 
 		bez_path.truncate(0);
 		let path = &mut bez_path;
-		let mut pen = GlyphOutlinePen { path, ox, oy, tilt_tan };
+		let mut pen = GlyphOutlinePen {
+			path,
+			ox,
+			oy,
+			tilt_tan,
+			glyph_scale: glyph_scale as f64,
+		};
 		if outline.draw(settings, &mut pen).is_ok() && !bez_path.elements().is_empty() {
 			emit(&bez_path);
 		} else if space_extra != 0. && glyph.advance > 0. {
@@ -3029,36 +3047,18 @@ fn draw_glyph_run_to_bezpaths(glyph_run: &parley::GlyphRun<'_, ()>, x_offset: f3
 /// square if the font isn't registered yet.
 fn text_item_size_and_transform(item: ItemRef<'_, String>) -> Option<(DVec2, DAffine2)> {
 	let text = item.element()?;
-	let font: Resource = {
-		let f: Resource = item.attribute_cloned_or_default(ATTR_FONT);
-		if f.is_empty() { text_nodes::FALLBACK_FONT_RESOURCE.clone() } else { f }
-	};
-	let font_size: f64 = item.attribute_cloned_or(ATTR_FONT_SIZE, DEFAULT_FONT_SIZE);
-	let line_height: f64 = item.attribute_cloned_or(ATTR_LINE_HEIGHT, 1.2);
-	let letter_spacing: f64 = item.attribute_cloned_or(ATTR_LETTER_SPACING, 0.);
-	let max_width: Option<f64> = item.attribute_cloned_or(ATTR_MAX_WIDTH, None);
-	let max_height: Option<f64> = item.attribute_cloned_or(ATTR_MAX_HEIGHT, None);
-	let align: text_nodes::TextAlign = item.attribute_cloned_or_default(ATTR_TEXT_ALIGN);
+	let font = text_nodes::text_item_font(&item);
+	let typesetting = text_nodes::TypesettingConfig::from_text_item(&item);
 	let transform: DAffine2 = item.attribute_cloned_or_default(ATTR_TRANSFORM);
-
-	let typesetting = text_nodes::TypesettingConfig {
-		font_size,
-		line_height_ratio: line_height,
-		letter_spacing,
-		letter_tilt: 0.,
-		max_width,
-		max_height,
-		align,
-	};
 
 	let (width, height) = text_nodes::TextContext::with_thread_local(|ctx| {
 		ctx.layout_text(text, &font, typesetting).map(|layout| {
-			let w = max_width.unwrap_or_else(|| layout.width() as f64);
-			let h = max_height.unwrap_or_else(|| layout.height() as f64);
+			let w = typesetting.max_width.unwrap_or_else(|| layout.drawn_width());
+			let h = typesetting.max_height.unwrap_or_else(|| layout.height() as f64);
 			(w, h)
 		})
 	})
-	.unwrap_or((font_size, font_size));
+	.unwrap_or((typesetting.font_size, typesetting.font_size));
 
 	Some((DVec2::new(width, height), transform))
 }
@@ -3150,37 +3150,18 @@ fn render_text_item_svg(item: ItemRef<'_, String>, render: &mut SvgRender, rende
 	let opacity_attr: f64 = item.attribute_cloned_or(ATTR_OPACITY, 1.);
 	let opacity_fill_attr: f64 = item.attribute_cloned_or(ATTR_OPACITY_FILL, 1.);
 	let blend_mode_attr: BlendMode = item.attribute_cloned_or_default(ATTR_BLEND_MODE);
-	let font: Resource = {
-		let f: Resource = item.attribute_cloned_or_default(ATTR_FONT);
-		if f.is_empty() { text_nodes::FALLBACK_FONT_RESOURCE.clone() } else { f }
-	};
-	let font_size: f64 = item.attribute_cloned_or(ATTR_FONT_SIZE, DEFAULT_FONT_SIZE);
-	let line_height: f64 = item.attribute_cloned_or(ATTR_LINE_HEIGHT, 1.2);
-	let letter_spacing: f64 = item.attribute_cloned_or(ATTR_LETTER_SPACING, 0.);
-	let max_width: Option<f64> = item.attribute_cloned_or(ATTR_MAX_WIDTH, None);
-	let max_height: Option<f64> = item.attribute_cloned_or(ATTR_MAX_HEIGHT, None);
-	let letter_tilt: f64 = item.attribute_cloned_or(ATTR_LETTER_TILT, 0.);
-	let align: text_nodes::TextAlign = item.attribute_cloned_or_default(ATTR_TEXT_ALIGN);
+	let font = text_nodes::text_item_font(&item);
+	let typesetting = text_nodes::TypesettingConfig::from_text_item(&item);
 	let opacity = (opacity_attr * if render_params.for_mask { 1. } else { opacity_fill_attr }) as f32;
-
-	let typesetting = text_nodes::TypesettingConfig {
-		font_size,
-		line_height_ratio: line_height,
-		letter_spacing,
-		letter_tilt,
-		max_width,
-		max_height,
-		align,
-	};
 
 	let mut glyph_paths: Vec<String> = Vec::new();
 
 	text_nodes::TextContext::with_thread_local(|ctx| {
 		let Some(layout) = ctx.layout_text(text, &font, typesetting) else { return };
-		let tilt_tan = letter_tilt.to_radians().tan();
+		let tilt_tan = typesetting.letter_tilt.to_radians().tan();
 
-		text_nodes::for_each_styled_glyph_run(&layout, text, typesetting, |glyph_run, x_offset, space_extra| {
-			draw_glyph_run_to_bezpaths(glyph_run, x_offset, space_extra, tilt_tan, |bez_path| {
+		text_nodes::for_each_styled_glyph_run(&layout, text, typesetting, |glyph_run, justification| {
+			draw_glyph_run_to_bezpaths(glyph_run, justification, tilt_tan, |bez_path| {
 				glyph_paths.push(bez_path.to_svg());
 			});
 		});
@@ -3231,31 +3212,12 @@ fn render_text_item_to_vello(item: ItemRef<'_, String>, scene: &mut Scene, trans
 	}
 
 	let item_transform: DAffine2 = item.attribute_cloned_or_default(ATTR_TRANSFORM);
-	let font: Resource = {
-		let f: Resource = item.attribute_cloned_or_default(ATTR_FONT);
-		if f.is_empty() { text_nodes::FALLBACK_FONT_RESOURCE.clone() } else { f }
-	};
-	let font_size: f64 = item.attribute_cloned_or(ATTR_FONT_SIZE, DEFAULT_FONT_SIZE);
-	let line_height: f64 = item.attribute_cloned_or(ATTR_LINE_HEIGHT, 1.2);
-	let letter_spacing: f64 = item.attribute_cloned_or(ATTR_LETTER_SPACING, 0.);
-	let max_width: Option<f64> = item.attribute_cloned_or(ATTR_MAX_WIDTH, None);
-	let max_height: Option<f64> = item.attribute_cloned_or(ATTR_MAX_HEIGHT, None);
-	let letter_tilt: f64 = item.attribute_cloned_or(ATTR_LETTER_TILT, 0.);
-	let align: text_nodes::TextAlign = item.attribute_cloned_or_default(ATTR_TEXT_ALIGN);
+	let font = text_nodes::text_item_font(&item);
+	let typesetting = text_nodes::TypesettingConfig::from_text_item(&item);
 	let blend_mode_attr: BlendMode = item.attribute_cloned_or_default(ATTR_BLEND_MODE);
 	let opacity_attr: f64 = item.attribute_cloned_or(ATTR_OPACITY, 1.);
 	let opacity_fill_attr: f64 = item.attribute_cloned_or(ATTR_OPACITY_FILL, 1.);
 	let opacity = (opacity_attr * if render_params.for_mask { 1. } else { opacity_fill_attr }) as f32;
-
-	let typesetting = text_nodes::TypesettingConfig {
-		font_size,
-		line_height_ratio: line_height,
-		letter_spacing,
-		letter_tilt,
-		max_width,
-		max_height,
-		align,
-	};
 
 	let affine = Affine::new((transform * item_transform).to_cols_array());
 
@@ -3264,18 +3226,18 @@ fn render_text_item_to_vello(item: ItemRef<'_, String>, scene: &mut Scene, trans
 
 		let needs_layer = opacity < 1. || blend_mode_attr != BlendMode::default();
 		if needs_layer {
-			let alignment_width = max_width.map(|w| w as f32).unwrap_or_else(|| layout.full_width());
+			let alignment_width = typesetting.max_width.unwrap_or_else(|| layout.drawn_full_width());
 			let blending = peniko::BlendMode::new(blend_mode_attr.to_peniko(), peniko::Compose::SrcOver);
-			let padding = font_size;
-			let bounds = kurbo::Rect::new(-padding, -padding, alignment_width as f64 + padding, layout.height() as f64 + padding);
+			let padding = typesetting.font_size;
+			let bounds = kurbo::Rect::new(-padding, -padding, alignment_width + padding, layout.height() as f64 + padding);
 			let transformed_bounds = affine.transform_rect_bbox(bounds);
 			scene.push_layer(peniko::Fill::NonZero, blending, opacity, kurbo::Affine::IDENTITY, &transformed_bounds);
 		}
 
-		let tilt_tan = letter_tilt.to_radians().tan();
+		let tilt_tan = typesetting.letter_tilt.to_radians().tan();
 
-		text_nodes::for_each_styled_glyph_run(&layout, text, typesetting, |glyph_run, x_offset, space_extra| {
-			draw_glyph_run_to_bezpaths(glyph_run, x_offset, space_extra, tilt_tan, |bez_path| {
+		text_nodes::for_each_styled_glyph_run(&layout, text, typesetting, |glyph_run, justification| {
+			draw_glyph_run_to_bezpaths(glyph_run, justification, tilt_tan, |bez_path| {
 				if let RenderMode::Outline = render_params.render_mode {
 					let (outline_stroke, outline_color) = get_outline_styles(render_params);
 					scene.stroke(&outline_stroke, affine, outline_color, None, bez_path);
